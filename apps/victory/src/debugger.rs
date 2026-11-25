@@ -764,6 +764,9 @@ fn stack_bounds(rsp: usize) -> Option<(usize, usize)> {
 fn stack_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
     let saved = {
         let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+        if !control.paused {
+            return Err("stack inspection requires a paused process".into());
+        }
         if control.hit_thread == Some(thread_id) {
             control.hit_context
         } else {
