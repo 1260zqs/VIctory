@@ -1335,7 +1335,7 @@ fn disassembly_before_json(runtime: &Runtime, address: u64, count: usize) -> Res
     let process_end = runtime.target.to_process_address(address)?;
     let count = count.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
     let requested = count.saturating_mul(15).min(MAX_MEMORY_READ);
-    let process_start = process_end.saturating_sub(requested);
+    let process_start = process_end.saturating_sub(requested).max(runtime.target.image_base);
     let available = process_end.saturating_sub(process_start);
     let mut bytes = vec![0u8; available];
     let mut read = 0usize;
