@@ -12,7 +12,7 @@ use std::ptr::null_mut;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
@@ -108,6 +108,7 @@ struct Runtime {
     started: Instant,
     server_thread: AtomicU32,
     breakpoints: Mutex<BTreeMap<usize, u8>>,
+    temporary_breakpoints: Mutex<HashSet<usize>>,
     control: Mutex<Control>,
     changed: Condvar,
     suspended: Mutex<Vec<usize>>,
@@ -126,6 +127,8 @@ struct Control {
     hit_address: Option<usize>,
     hit_thread: Option<u32>,
     hit_registers: Option<Registers>,
+    hit_context: Option<CONTEXT>,
+    exception_code: Option<u32>,
     action: Action,
     step_thread: Option<u32>,
     step_breakpoint: Option<usize>,
@@ -173,12 +176,15 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
         started: Instant::now(),
         server_thread: AtomicU32::new(0),
         breakpoints: Mutex::new(BTreeMap::new()),
+        temporary_breakpoints: Mutex::new(HashSet::new()),
         control: Mutex::new(Control {
             paused: false,
             reason: "running",
             hit_address: None,
             hit_thread: None,
             hit_registers: None,
+            hit_context: None,
+            exception_code: None,
             action: Action::Wait,
             step_thread: None,
             step_breakpoint: None,
@@ -293,7 +299,13 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             breakpoints.get(&address).copied()
         };
         let Some(original) = original else {
-            return 0;
+            let in_title = address
+                .checked_sub(runtime.target.image_base)
+                .is_some_and(|offset| offset < runtime.target.image_size);
+            if !in_title {
+                return 0;
+            }
+            return handle_title_breakpoint(runtime, context, address);
         };
 
         // Restore the original byte. RIP already points at the INT3 address,
@@ -301,6 +313,18 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         // SAFETY: the breakpoint was installed by this debugger at this address.
         if unsafe { write_code_byte(address, original) }.is_err() {
             return 0;
+        }
+        let temporary = runtime
+            .temporary_breakpoints
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&address);
+        if temporary {
+            runtime
+                .breakpoints
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&address);
         }
         context.EFlags |= TRAP_FLAG;
         // SAFETY: a plain query of the title thread that raised the breakpoint.
@@ -313,6 +337,8 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.hit_address = Some(address);
         control.hit_thread = Some(thread_id);
         control.hit_registers = Some(Registers::from(context));
+        control.hit_context = Some(*context);
+        control.exception_code = None;
         control.step_thread = Some(thread_id);
         control.step_breakpoint = Some(address);
         control.action = Action::Wait;
@@ -330,24 +356,24 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
     if record.ExceptionCode == EXCEPTION_SINGLE_STEP {
         // SAFETY: a plain query of the title thread that raised the exception.
         let thread_id = unsafe { GetCurrentThreadId() };
-        let breakpoint = {
+        let (is_step_thread, breakpoint) = {
             let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
-            (control.step_thread == Some(thread_id))
-                .then_some(control.step_breakpoint)
-                .flatten()
+            (control.step_thread == Some(thread_id), control.step_breakpoint)
         };
-        let Some(address) = breakpoint else {
+        if !is_step_thread {
             return 0;
-        };
-        let enabled = runtime
-            .breakpoints
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains_key(&address);
-        if enabled {
-            // SAFETY: this is the address whose original byte was saved when
-            // the user installed the software breakpoint.
-            let _ = unsafe { write_code_byte(address, 0xCC) };
+        }
+        if let Some(address) = breakpoint {
+            let enabled = runtime
+                .breakpoints
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .contains_key(&address);
+            if enabled {
+                // SAFETY: this is the address whose original byte was saved when
+                // the user installed the software breakpoint.
+                let _ = unsafe { write_code_byte(address, 0xCC) };
+            }
         }
         context.EFlags &= !TRAP_FLAG;
 
@@ -358,6 +384,8 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             control.hit_address = None;
             control.hit_thread = None;
             control.hit_registers = None;
+            control.hit_context = None;
+            control.exception_code = None;
             control.step_thread = None;
             control.step_breakpoint = None;
             runtime.changed.notify_all();
@@ -371,6 +399,8 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.hit_address = Some(context.Rip as usize);
         control.hit_thread = Some(thread_id);
         control.hit_registers = Some(Registers::from(context));
+        control.hit_context = Some(*context);
+        control.exception_code = None;
         control.action = Action::Wait;
         runtime.changed.notify_all();
 
@@ -393,6 +423,8 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
                 control.hit_address = None;
                 control.hit_thread = None;
                 control.hit_registers = None;
+                control.hit_context = None;
+                control.exception_code = None;
                 control.step_thread = None;
                 control.step_breakpoint = None;
                 runtime.changed.notify_all();
@@ -405,6 +437,60 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
     }
 
     0 // EXCEPTION_CONTINUE_SEARCH
+}
+
+fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: usize) -> i32 {
+    // A title-generated INT3 (for example __debugbreak()) is an inspectable
+    // stop, not an unhandled exception. All other process breakpoints pass on.
+    let thread_id = unsafe { GetCurrentThreadId() };
+    suspend_peers(runtime, &[thread_id]);
+
+    let mut control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    control.paused = true;
+    control.reason = "exception";
+    control.hit_address = Some(address);
+    control.hit_thread = Some(thread_id);
+    control.hit_registers = Some(Registers::from(context));
+    control.hit_context = Some(*context);
+    control.exception_code = Some(EXCEPTION_BREAKPOINT);
+    control.step_thread = Some(thread_id);
+    control.step_breakpoint = None;
+    control.stop_after_instruction = false;
+    control.action = Action::Wait;
+    runtime.changed.notify_all();
+
+    while control.action == Action::Wait {
+        control = runtime.changed.wait(control).unwrap_or_else(|e| e.into_inner());
+    }
+
+    let action = control.action;
+    control.paused = false;
+    control.reason = "running";
+    control.hit_address = None;
+    control.hit_thread = None;
+    control.hit_registers = None;
+    control.hit_context = None;
+    control.exception_code = None;
+    control.step_breakpoint = None;
+    control.stop_after_instruction = action == Action::Step;
+    if action == Action::Step {
+        control.step_thread = Some(thread_id);
+    } else {
+        control.step_thread = None;
+    }
+    runtime.changed.notify_all();
+    drop(control);
+
+    // __debugbreak emits a one-byte INT3. Continue skips it; Step skips it
+    // and traps after exactly the following native instruction.
+    context.Rip = (address as u64).saturating_add(1);
+    context.EFlags &= !TRAP_FLAG;
+    if action == Action::Step {
+        context.EFlags |= TRAP_FLAG;
+    } else {
+        resume_peers(runtime);
+    }
+    -1 // EXCEPTION_CONTINUE_EXECUTION
 }
 
 impl Registers {
@@ -537,7 +623,7 @@ fn process_thread_ids() -> Vec<u32> {
     ids
 }
 
-fn read_context(thread_id: u32) -> Option<Registers> {
+fn read_thread_context(thread_id: u32) -> Option<AlignedContext> {
     // SAFETY: opens the requested thread for a brief context read.
     let handle = unsafe {
         OpenThread(
@@ -565,7 +651,11 @@ fn read_context(thread_id: u32) -> Option<Registers> {
     };
     // SAFETY: handle was opened successfully above.
     unsafe { CloseHandle(handle) };
-    result.then(|| Registers::from(&context.0))
+    result.then_some(context)
+}
+
+fn read_context(thread_id: u32) -> Option<Registers> {
+    read_thread_context(thread_id).map(|context| Registers::from(&context.0))
 }
 
 fn thread_name(thread_id: u32) -> String {
@@ -632,6 +722,97 @@ fn registers_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
     }))
 }
 
+fn stack_bounds(rsp: usize) -> Option<(usize, usize)> {
+    let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    let read = unsafe {
+        VirtualQuery(
+            rsp as *const c_void,
+            &mut info,
+            size_of::<MEMORY_BASIC_INFORMATION>(),
+        )
+    };
+    if read == 0 || info.AllocationBase.is_null() {
+        return None;
+    }
+
+    let allocation_base = info.AllocationBase as usize;
+    let mut cursor = (info.BaseAddress as usize).checked_add(info.RegionSize)?;
+    let mut high = cursor;
+    for _ in 0..128 {
+        let mut next: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let read = unsafe {
+            VirtualQuery(
+                cursor as *const c_void,
+                &mut next,
+                size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        if read == 0 || next.AllocationBase as usize != allocation_base {
+            break;
+        }
+        let end = (next.BaseAddress as usize).checked_add(next.RegionSize)?;
+        if end <= cursor {
+            break;
+        }
+        cursor = end;
+        high = end;
+    }
+
+    (rsp >= allocation_base && rsp < high).then_some((allocation_base, high))
+}
+
+fn stack_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
+    let saved = {
+        let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+        if control.hit_thread == Some(thread_id) {
+            control.hit_context
+        } else {
+            None
+        }
+    };
+    let context = saved
+        .map(AlignedContext)
+        .or_else(|| read_thread_context(thread_id))
+        .ok_or_else(|| format!("thread {thread_id} exited or its context is unavailable"))?;
+    let rsp = context.0.Rsp as usize;
+    let (low, high) = stack_bounds(rsp)
+        .ok_or_else(|| format!("could not determine stack bounds for thread {thread_id}"))?;
+    let frames = victory_loader::unwind_context(context.0, low, high);
+    let frames: Vec<Value> = frames
+        .into_iter()
+        .enumerate()
+        .map(|(index, address)| {
+            let runtime_address = address as usize;
+            json!({
+                "index": index,
+                "address": format!("{:#x}", runtime.target.to_ida_address(runtime_address)),
+                "runtime_address": format!("{runtime_address:#x}"),
+                "location": victory_loader::locate(runtime_address),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "thread_id": thread_id,
+        "stack_low": format!("{low:#x}"),
+        "stack_high": format!("{high:#x}"),
+        "frames": frames,
+    }))
+}
+
+fn wait_for_stop(runtime: &Runtime, timeout: Duration) -> Value {
+    let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    let (control, result) = runtime
+        .changed
+        .wait_timeout_while(control, timeout, |control| !control.paused)
+        .unwrap_or_else(|error| error.into_inner());
+    let timed_out = result.timed_out() && !control.paused;
+    drop(control);
+    json!({
+        "timed_out": timed_out,
+        "status": status_json(runtime),
+    })
+}
+
 fn status_json(runtime: &Runtime) -> Value {
     // SAFETY: a plain query of the current process ID.
     let pid = unsafe { GetCurrentProcessId() };
@@ -658,6 +839,13 @@ fn status_json(runtime: &Runtime) -> Value {
             .hit_address
             .map(|v| format!("{:#x}", runtime.target.to_ida_address(v))),
         "hit_thread": control.hit_thread,
+        "exception": control.exception_code.map(|code| json!({
+            "code": format!("{code:#010x}"),
+            "address": control.hit_address.map(|address| {
+                format!("{:#x}", runtime.target.to_ida_address(address))
+            }),
+            "thread_id": control.hit_thread,
+        })),
         "breakpoint_count": breakpoints.len(),
         "uptime_seconds": runtime.started.elapsed().as_secs(),
     })
@@ -894,6 +1082,11 @@ fn remove_breakpoint(runtime: &Runtime, address: usize) -> Result<(), String> {
     if !was_paused {
         suspend_peers(runtime, &[]);
     }
+    runtime
+        .temporary_breakpoints
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&address);
     let original = runtime
         .breakpoints
         .lock()
@@ -923,6 +1116,8 @@ fn pause(runtime: &Runtime) {
     control.hit_address = None;
     control.hit_thread = None;
     control.hit_registers = None;
+    control.hit_context = None;
+    control.exception_code = None;
     runtime.changed.notify_all();
 }
 
@@ -937,16 +1132,54 @@ fn continue_or_step(runtime: &Runtime, step: bool) -> Result<(), String> {
         }
         control.paused = false;
         control.reason = "running";
+        control.hit_address = None;
+        control.hit_thread = None;
+        control.hit_registers = None;
+        control.hit_context = None;
+        control.exception_code = None;
+        runtime.changed.notify_all();
         drop(control);
         resume_peers(runtime);
         return Ok(());
     }
-    if control.reason != "breakpoint" && control.reason != "step" {
+    if control.reason != "breakpoint" && control.reason != "step" && control.reason != "exception" {
         return Err("the current stop cannot be stepped".into());
     }
     control.action = if step { Action::Step } else { Action::Continue };
     control.paused = false;
+    control.reason = "running";
+    control.hit_address = None;
+    control.hit_thread = None;
+    control.hit_registers = None;
+    control.hit_context = None;
+    control.exception_code = None;
     runtime.changed.notify_all();
+    Ok(())
+}
+
+fn run_to(runtime: &Runtime, address: usize) -> Result<(), String> {
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("run-to requires a paused process".into());
+    }
+    let already_set = runtime
+        .breakpoints
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&address);
+    add_breakpoint(runtime, address)?;
+    if !already_set {
+        runtime
+            .temporary_breakpoints
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(address);
+    }
+    if let Err(error) = continue_or_step(runtime, false) {
+        if !already_set {
+            remove_breakpoint(runtime, address)?;
+        }
+        return Err(error);
+    }
     Ok(())
 }
 
@@ -985,12 +1218,15 @@ fn url_decode(value: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn parse_address(value: Option<String>, default: usize) -> Option<usize> {
-    value
-        .as_deref()
-        .map(|value| value.trim().trim_start_matches("0x").trim_start_matches("0X"))
-        .map(|value| usize::from_str_radix(value, 16).ok())
-        .unwrap_or(Some(default))
+fn parse_address(value: Option<String>, default: Option<usize>) -> Option<usize> {
+    let Some(value) = value else {
+        return default;
+    };
+    let value = value.trim().trim_start_matches("0x").trim_start_matches("0X");
+    if value.is_empty() {
+        return None;
+    }
+    usize::from_str_radix(value, 16).ok()
 }
 
 fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
@@ -1051,6 +1287,31 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
         }
         ("GET", "/api/status") => (200, status_json(runtime)),
         ("GET", "/api/threads") => (200, threads_json(runtime)),
+        ("GET", "/api/wait") => {
+            let timeout_ms = match query_value(query, "timeout_ms") {
+                Some(value) => match value.parse::<u64>() {
+                    Ok(value) => value.clamp(1, 60_000),
+                    Err(_) => {
+                        respond(&mut stream, 400, "application/json", r#"{"error":"invalid timeout_ms"}"#);
+                        return;
+                    }
+                },
+                None => 30_000,
+            };
+            (200, wait_for_stop(runtime, Duration::from_millis(timeout_ms)))
+        }
+        ("GET", "/api/stack") => {
+            let Some(thread_id) = query_value(query, "thread")
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"invalid thread ID"}"#);
+                return;
+            };
+            match stack_json(runtime, thread_id) {
+                Ok(value) => (200, value),
+                Err(error) => (404, json!({"error": error})),
+            }
+        }
         ("GET", "/api/registers") => {
             let Some(thread_id) = query_value(query, "thread")
                 .and_then(|value| value.parse::<u32>().ok())
@@ -1064,7 +1325,10 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             }
         }
         ("GET", "/api/regions") => {
-            let cursor = parse_address(query_value(query, "cursor"), 0).unwrap_or(0);
+            let Some(cursor) = parse_address(query_value(query, "cursor"), Some(0)) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"invalid cursor"}"#);
+                return;
+            };
             let cursor = match runtime.target.to_process_address(cursor as u64) {
                 Ok(address) => address,
                 Err(error) => {
@@ -1079,7 +1343,7 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             (200, regions_json(runtime, cursor, limit))
         }
         ("GET", "/api/memory") => {
-            let Some(address) = parse_address(query_value(query, "address"), 0) else {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
@@ -1108,8 +1372,25 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             Ok(()) => (200, status_json(runtime)),
             Err(error) => (409, json!({"error": error})),
         },
+        ("POST", "/api/runto") => {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"missing or invalid address"}"#);
+                return;
+            };
+            let address = match runtime.target.to_process_address(address as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
+            };
+            match run_to(runtime, address) {
+                Ok(()) => (200, status_json(runtime)),
+                Err(error) => (409, json!({"error": error})),
+            }
+        }
         ("POST", "/api/breakpoints/add") => {
-            let Some(address) = parse_address(query_value(query, "address"), 0) else {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
@@ -1126,7 +1407,7 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             }
         }
         ("POST", "/api/breakpoints/remove") => {
-            let Some(address) = parse_address(query_value(query, "address"), 0) else {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
@@ -1184,9 +1465,11 @@ mod tests {
 
     #[test]
     fn address_parser_accepts_hex_addresses() {
-        assert_eq!(parse_address(Some("0x7ff900001000".into()), 0), Some(0x7ff900001000));
-        assert_eq!(parse_address(Some("7FF900001000".into()), 0), Some(0x7ff900001000));
-        assert_eq!(parse_address(Some("invalid".into()), 0), None);
+        assert_eq!(parse_address(Some("0x7ff900001000".into()), None), Some(0x7ff900001000));
+        assert_eq!(parse_address(Some("7FF900001000".into()), None), Some(0x7ff900001000));
+        assert_eq!(parse_address(Some("invalid".into()), None), None);
+        assert_eq!(parse_address(None, None), None);
+        assert_eq!(parse_address(None, Some(0)), Some(0));
     }
 
     #[test]
