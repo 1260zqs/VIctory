@@ -1326,6 +1326,63 @@ fn decode_instructions(
     instructions
 }
 
+
+fn disassembly_before_json(runtime: &Runtime, address: u64, count: usize) -> Result<Value, String> {
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("disassembly requires a paused process".into());
+    }
+
+    let process_end = runtime.target.to_process_address(address)?;
+    let count = count.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+    let requested = count.saturating_mul(15).min(MAX_MEMORY_READ);
+    let process_start = process_end.saturating_sub(requested);
+    let available = process_end.saturating_sub(process_start);
+    let mut bytes = vec![0u8; available];
+    let mut read = 0usize;
+    let ok = unsafe {
+        ReadProcessMemory(
+            GetCurrentProcess(),
+            process_start as *const c_void,
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+            &mut read,
+        )
+    } != 0;
+    if !ok || read == 0 {
+        return Err(format!("could not read code before {process_end:#x}: {}", std::io::Error::last_os_error()));
+    }
+    bytes.truncate(read);
+    let mut end = bytes.len();
+    let mut reversed = Vec::with_capacity(count);
+    while end > 0 && reversed.len() < count {
+        let mut found = None;
+        let max_len = end.min(15);
+        for length in (1..=max_len).rev() {
+            let start = end - length;
+            let mut decoder = Decoder::with_ip(64, &bytes[start..end], (process_start + start) as u64, DecoderOptions::NONE);
+            let instruction = decoder.decode();
+            if !instruction.is_invalid() && decoder.position() == length {
+                found = Some(start);
+                break;
+            }
+        }
+        let Some(start) = found else { break };
+        let mut decoded = decode_instructions(&runtime.target, process_start + start, &bytes[start..end], 1);
+        if let Some(instruction) = decoded.pop() {
+            reversed.push(instruction);
+        }
+        end = start;
+    }
+    reversed.reverse();
+    Ok(json!({
+        "address": format!("{:#x}", runtime.target.to_ida_address(process_start + end)),
+        "runtime_address": format!("{:#x}", process_start + end),
+        "bytes_read": read,
+        "instruction_count": reversed.len(),
+        "instructions": reversed,
+    }))
+}
+
 fn disassembly_json(runtime: &Runtime, address: u64, count: usize) -> Result<Value, String> {
     if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
         return Err("disassembly requires a paused process".into());
@@ -1946,6 +2003,18 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 .unwrap_or(250)
                 .clamp(1, 500);
             (200, regions_json(runtime, cursor, limit))
+        }
+        ("GET", "/api/disassemble/before") => {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
+                respond(&mut stream, 400, "application/json", r#"{\"error\":\"invalid address\"}"#);
+                return;
+            };
+            let count = query_value(query, "count").and_then(|value| value.parse::<usize>().ok()).unwrap_or(128);
+            match disassembly_before_json(runtime, address as u64, count) {
+                Ok(value) => (200, value),
+                Err(error) if error == "disassembly requires a paused process" => (409, json!({"error": error})),
+                Err(error) => (404, json!({"error": error})),
+            }
         }
         ("GET", "/api/disassemble") => {
             let Some(address) = parse_address(query_value(query, "address"), None) else {
