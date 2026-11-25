@@ -191,6 +191,9 @@ The loopback HTTP API also exposes:
   polling status.
 - `POST /api/runto?address=0x...` — install a one-shot breakpoint and resume
   until that address (requires the process to be paused).
+- `POST /api/memory/write?address=0x...&hex=...` — write up to 4 KiB of
+  hexadecimal bytes while paused. Writes stay within one committed memory
+  region and cannot overlap an active software breakpoint.
 - A title-generated `INT3` / `__debugbreak()` is reported as
   `reason:"exception"` in `/api/status`; Resume skips the INT3, while Step
   skips it and stops after the next native instruction.
