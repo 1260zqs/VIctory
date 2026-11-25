@@ -158,99 +158,114 @@ the translated shaders do not require it at runtime.
 
 ## Debugging
 
-The in-process runtime debugger is available in regular release builds:
+VIctory includes an in-process x64 debugger in regular release builds. Start the
+title with the debugger enabled:
 
 ```powershell
 target\release\victory.exe run <game dir>\<the title's exe> --execute --debugger
 ```
 
-Open **http://127.0.0.1:17890** in a browser. Use `--debugger=PORT` to choose
-another port. The listener binds only to loopback. Before launching the title,
-VIctory installs an automatic software breakpoint at the executable entry
-point, so execution stops there as soon as the main thread reaches it. Continue
-from the debugger UI to run the title. The debugger shows the title image
-mapping, live x64 thread registers, virtual memory regions, memory bytes and
-software breakpoints. Pause freezes the other process threads while leaving
-the debugger's HTTP thread responsive. Continue releases them. A breakpoint
-hit stops at the original instruction; Step executes one instruction and
-stops again.
+Then open **http://127.0.0.1:17890**. Override the port with
+`--debugger=PORT`. The HTTP listener binds to loopback only.
 
-The debugger uses IDA virtual addresses for the title executable. Its IDA
-image base comes from the executable's preferred image base (the IDA base for
-this title is `0x140000000`); the UI also shows the actual runtime image base
-and the signed rebase delta (`IDA base - runtime base`). Paste an IDA EA
-directly into Add Breakpoint or Memory Read. The API translates addresses
-inside the title image back to native process addresses before reading memory
-or installing an x64 `INT3`. Other process mappings, such as host DLLs and
-thread stacks, retain their native virtual addresses.
+### First stop and execution control
 
-The loopback HTTP API also exposes:
-- `GET /api/stack?thread=ID` — unwind the selected thread while paused; frames
-  include IDA/native addresses and a module-relative location.
-- `GET /api/disassemble?address=0x...&count=64` — decode up to 128 x64
-  instructions from a paused process using Intel syntax. Title addresses and
-  RIP-relative operands are formatted in IDA address space. The dashboard
-  follows the active stop automatically and switches disassembly when a stack
-  frame is selected.
-- `GET /api/wait?timeout_ms=30000` — wait for the next paused stop instead of
-  polling status.
-- `POST /api/runto?address=0x...` — arm a temporary breakpoint and resume
-  until that address (requires the process to be paused). The request returns
-  immediately; pair it with `GET /api/wait`. If the address already has a
-  persistent breakpoint, that breakpoint is left persistent.
-- `POST /api/memory/write?address=0x...&hex=...` — write up to 4 KiB of
-  hexadecimal bytes while paused. Writes stay within one committed memory
-  region and cannot overlap an active software breakpoint.
-- `POST /api/registers/set?thread=ID&name=RAX&value=0x...` — edit a
-  general-purpose register on the thread at the active exception stop. Title
-  addresses in register values use IDA space; edits apply when the thread resumes.
-- `GET /api/io/breakpoints` — read the file-I/O breakpoint configuration.
-- `POST /api/io/breakpoints?read=true&write=true&path=common.rpf` — arm
-  read/write breakpoints, optionally filtered by a case-insensitive path
-  substring. Omit `path` or pass an empty value to match every path.
-- `GET /api/io/events` — retrieve the last 100 observed file-I/O requests.
+The debugger installs a software breakpoint at the title entry point before
+execution starts. The process should stop there automatically. Use **Resume**
+to continue, **Pause** to interrupt execution, and **Step** to execute one
+instruction from a supported instruction breakpoint. A breakpoint hit restores
+the original instruction byte, executes that instruction, then rearms the
+breakpoint.
 
-The neon runtime dashboard shows the selected thread's call stack automatically
-when a stop is reported. File-I/O breakpoints stop the thread that initiates the
-operation, before the intercepted call proceeds. They cover VIctory's title
-HLE boundaries for Win32 `ReadFile`/`WriteFile`, CRT `fread`/`fwrite`
-and `_read`/`_write`, plus DirectStorage request enqueue. The DirectStorage
-stack is the game thread that submits the request, not the worker that later
-performs the queued read. The event history records requested operations; it
-does not claim that the underlying I/O later succeeded. File offsets are
-captured from the `OVERLAPPED` structure for overlapped Win32 I/O, from the
-current file pointer for synchronous `ReadFile`/`WriteFile`, and from the CRT
-stream/descriptor cursor for `fread`/`fwrite` and `_read`/`_write`. The
-offset is best-effort when a handle is not seekable; concurrent synchronous
-operations sharing one file pointer can move that pointer between the query
-and the actual call. DirectStorage reports the request's explicit file offset.
+Use the Breakpoints panel to add or remove software breakpoints. Use **Run to**
+to resume until a specified address. Run-to is asynchronous: the request
+returns after execution resumes, and the debugger UI waits for the next stop.
 
-These are API-boundary breakpoints, **not** x64 hardware data breakpoints
-(DR0–DR3). They are intended to answer "which game function asked the runtime
-to read or write this file?" They do not catch arbitrary I/O performed by
-unhooked host-library code or direct native syscalls that bypass these HLE
-entry points.
+### Addresses, registers and call stack
 
-- `GET /api/io/breakpoints` — read the file-I/O breakpoint configuration.
-- `POST /api/io/breakpoints?read=true&write=true&path=common.rpf` — arm
-  read/write breakpoints, optionally filtered by a case-insensitive path
-  substring. Omit `path` or pass an empty value to match every path.
-- `GET /api/io/events` — retrieve the last 100 observed file-I/O requests.
+Addresses inside the title image use IDA virtual-address space. The default
+preferred image base for this title is `0x140000000`; the dashboard also shows
+the actual runtime image base and the signed rebase delta
+(`IDA base - runtime base`). You can paste an IDA EA into breakpoint,
+disassembly or memory controls. Addresses outside the title image, such as
+host DLLs and thread stacks, remain native process virtual addresses.
 
-The neon runtime dashboard shows the selected thread's call stack automatically
-when a stop is reported. File-I/O breakpoints stop the thread that initiates the
-operation, before the intercepted call proceeds. They cover VIctory's title
-HLE boundaries for Win32 `ReadFile`/`WriteFile`, CRT `fread`/`fwrite`
-and `_read`/`_write`, plus DirectStorage request enqueue. The DirectStorage
-stack is the game thread that submits the request, not the worker that later
-performs the queued read. The event history records requested operations; it
-does not claim that the underlying I/O later succeeded.
+When execution stops, the dashboard selects the stopped thread and refreshes
+its registers and call stack. Select a stack frame to inspect its address in
+the Disassembly panel. The stack includes module-relative locations where
+available; symbol names are not guaranteed.
+
+### Disassembly and memory
+
+The Disassembly panel follows the current stop by default. Enter an IDA or
+native address and press **Go** to inspect another location. Select a stack
+frame to jump to that frame. Scroll down to fetch subsequent instruction
+pages; scroll up to fetch preceding instructions. The UI preserves the visible
+position when it prepends earlier instructions. Backward x64 decoding is
+best-effort because x64 instructions are variable length and arbitrary byte
+sequences can admit more than one valid decoding.
+
+The Memory inspector reads process memory at an entered address or a selected
+region. Reads are limited to 4 KiB per request. Memory writes are available
+through the HTTP API while paused and are limited to one committed region; a
+write cannot overlap an active software breakpoint.
+
+### File-I/O breakpoints
+
+Enable **Read** and/or **Write** in the File I/O Breakpoints panel. Optionally
+enter a path substring such as `common.rpf` to filter case-insensitively, then
+apply the configuration. A matching operation pauses the thread that requested
+the I/O. The automatically refreshed call stack is intended to show the game
+function that initiated the operation.
+
+The hooks cover VIctory's title HLE boundaries for Win32
+`ReadFile`/`WriteFile`, CRT `fread`/`fwrite` and `_read`/`_write`,
+plus DirectStorage request enqueue. For DirectStorage, the stack belongs to the
+game thread submitting the request, not the worker that later performs the
+queued read.
+
+The event history records requested operations, not proof that the underlying
+I/O completed successfully. File offsets come from the `OVERLAPPED` structure
+for overlapped Win32 I/O, the current file pointer for synchronous
+`ReadFile`/`WriteFile`, the CRT stream/descriptor cursor for CRT operations,
+and the explicit request offset for DirectStorage. Offsets are best-effort for
+non-seekable handles; concurrent synchronous operations sharing one file
+pointer can move it between the position query and the operation.
 
 These are API-boundary breakpoints, **not** x64 hardware data breakpoints
-(DR0–DR3). They are intended to answer "which game function asked the runtime
-to read or write this file?" They do not catch arbitrary I/O performed by
-unhooked host-library code or direct native syscalls that bypass these HLE
-entry points.
+(DR0–DR3). They do not catch arbitrary I/O performed by unhooked host-library
+code or direct native syscalls that bypass the HLE entry points.
+
+### HTTP API reference
+
+The loopback HTTP API is useful for scripts and external tools:
+
+| Method and path | Purpose |
+|---|---|
+| `GET /api/status` | Process state, stop reason and target address mapping |
+| `GET /api/threads` | Enumerate inspectable threads |
+| `GET /api/registers?thread=ID` | Read a thread's registers |
+| `GET /api/stack?thread=ID` | Unwind a thread while paused |
+| `GET /api/disassemble?address=0x...&count=128` | Decode forward from an address |
+| `GET /api/disassemble/before?address=0x...&count=128` | Decode preceding instructions, best-effort |
+| `GET /api/memory?address=0x...&length=256` | Read process memory |
+| `GET /api/regions?cursor=0x...` | Enumerate virtual memory regions |
+| `GET /api/breakpoints` | List software breakpoints |
+| `POST /api/breakpoints/add?address=0x...` | Add a software breakpoint |
+| `POST /api/breakpoints/remove?address=0x...` | Remove a software breakpoint |
+| `POST /api/pause` / `POST /api/resume` | Pause or resume execution |
+| `POST /api/step` | Execute one instruction from a supported stop |
+| `POST /api/runto?address=0x...` | Resume until an address; pair with `GET /api/wait` |
+| `GET /api/wait?timeout_ms=30000` | Wait for the next stop instead of polling |
+| `POST /api/memory/write?address=0x...&hex=...` | Write up to 4 KiB while paused |
+| `POST /api/registers/set?thread=ID&name=RAX&value=0x...` | Edit a register at an exception stop |
+| `GET /api/io/breakpoints` | Read file-I/O breakpoint settings |
+| `POST /api/io/breakpoints?read=true&write=true&path=common.rpf` | Configure file-I/O breakpoints |
+| `GET /api/io/events` | Read the last 100 file-I/O requests |
+
+For an I/O breakpoint, `GET /api/stack?thread=ID` can inspect the initiating
+thread while it is paused. The DirectStorage event offset is the request's
+explicit file offset.
 
 An unowned process `INT3` (including title or CRT `__debugbreak()`) is
 reported as `reason:"exception"` in `/api/status`. Resume skips the one-byte
@@ -259,13 +274,13 @@ continue. Step skips that INT3 and stops after the next native instruction.
 First-chance access violations (`0xC0000005`) and illegal-instruction
 exceptions can also be inspected with their call stack and access details.
 Resume without editing the saved context passes those exceptions to later
-Windows exception handlers; editing a register or RIP and resuming applies the
-modified context instead.
+Windows exception handlers; editing a register or RIP and resuming applies
+the modified context instead.
 
 This is an in-process debugger, not a CPU emulator or a remote debugger.
-Memory reads are capped at 4 KiB per request. Pausing all threads can catch a
-thread while it owns a process-wide lock; keep debugger requests read-focused
-while paused and continue promptly if other runtime work is blocked.
+Pausing all threads can catch a thread while it owns a process-wide lock; keep
+debugger requests read-focused while paused and continue promptly if other
+runtime work is blocked.
 
 Build diagnostics separately when you also need scheduled stack dumps,
 memory-on-crash capture and the other switches below:
