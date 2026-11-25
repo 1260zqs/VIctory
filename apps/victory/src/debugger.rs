@@ -15,6 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use iced_x86::{Decoder, DecoderOptions, Formatter, IntelFormatter};
 use serde_json::{Value, json};
 use windows_sys::Win32::Foundation::{
     CloseHandle, EXCEPTION_ACCESS_VIOLATION, EXCEPTION_BREAKPOINT, EXCEPTION_ILLEGAL_INSTRUCTION,
@@ -41,6 +42,7 @@ const TRAP_FLAG: u32 = 0x100;
 const DEFAULT_WINMAIN_IDA_ADDRESS: u64 = 0x145A91BD0;
 const MAX_HTTP_HEADER: usize = 16 * 1024;
 const MAX_MEMORY_READ: usize = 0x1000;
+const MAX_DISASSEMBLY_INSTRUCTIONS: usize = 128;
 
 #[derive(Clone)]
 pub struct DebugTarget {
@@ -1281,6 +1283,87 @@ fn regions_json(runtime: &Runtime, cursor: usize, limit: usize) -> Value {
     })
 }
 
+fn decode_instructions(
+    target: &DebugTarget,
+    runtime_start: usize,
+    bytes: &[u8],
+    count: usize,
+) -> Vec<Value> {
+    let mut decoder = Decoder::with_ip(64, bytes, runtime_start as u64, DecoderOptions::NONE);
+    let mut formatter = IntelFormatter::new();
+    let mut instructions = Vec::with_capacity(count);
+
+    while decoder.can_decode() && instructions.len() < count {
+        let instruction = decoder.decode();
+        let runtime_address = instruction.ip() as usize;
+        let ida_address = target.to_ida_address(runtime_address);
+        let length = usize::from(instruction.len());
+        let start = runtime_address.saturating_sub(runtime_start);
+        let end = start.saturating_add(length).min(bytes.len());
+        let raw = bytes.get(start..end).unwrap_or_default();
+
+        // Format with the IDA-space IP so RIP-relative operands and branch
+        // destinations stay in the same address space as the debugger UI.
+        let mut display_instruction = instruction;
+        display_instruction.set_ip(ida_address);
+        let mut text = String::new();
+        formatter.format(&display_instruction, &mut text);
+        if instruction.is_invalid() {
+            text = "invalid instruction".to_owned();
+        }
+
+        instructions.push(json!({
+            "address": format!("{ida_address:#x}"),
+            "runtime_address": format!("{runtime_address:#x}"),
+            "bytes": raw.iter().map(|byte| format!("{byte:02X}")).collect::<Vec<_>>().join(" "),
+            "text": text,
+            "length": length,
+            "invalid": instruction.is_invalid(),
+        }));
+    }
+
+    instructions
+}
+
+fn disassembly_json(runtime: &Runtime, address: u64, count: usize) -> Result<Value, String> {
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("disassembly requires a paused process".into());
+    }
+
+    let process_address = runtime.target.to_process_address(address)?;
+    let count = count.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+    let requested = count.saturating_mul(15).min(MAX_MEMORY_READ);
+    let mut bytes = vec![0u8; requested];
+    let mut read = 0usize;
+    // SAFETY: ReadProcessMemory validates the address range in this process.
+    let ok = unsafe {
+        ReadProcessMemory(
+            GetCurrentProcess(),
+            process_address as *const c_void,
+            bytes.as_mut_ptr().cast(),
+            bytes.len(),
+            &mut read,
+        )
+    } != 0;
+    bytes.truncate(read);
+    if bytes.is_empty() {
+        return Err(if ok {
+            "no code bytes were returned".into()
+        } else {
+            format!("could not read code at {process_address:#x}: {}", std::io::Error::last_os_error())
+        });
+    }
+
+    let instructions = decode_instructions(&runtime.target, process_address, &bytes, count);
+    Ok(json!({
+        "address": format!("{:#x}", runtime.target.to_ida_address(process_address)),
+        "runtime_address": format!("{process_address:#x}"),
+        "bytes_read": bytes.len(),
+        "instruction_count": instructions.len(),
+        "instructions": instructions,
+    }))
+}
+
 fn memory_json(runtime: &Runtime, address: usize, requested: usize) -> Value {
     let length = requested.clamp(1, MAX_MEMORY_READ);
     let mut bytes = vec![0u8; length];
@@ -1863,6 +1946,23 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 .clamp(1, 500);
             (200, regions_json(runtime, cursor, limit))
         }
+        ("GET", "/api/disassemble") => {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
+                return;
+            };
+            let count = query_value(query, "count")
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(64)
+                .clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+            match disassembly_json(runtime, address as u64, count) {
+                Ok(value) => (200, value),
+                Err(error) if error == "disassembly requires a paused process" => {
+                    (409, json!({"error": error}))
+                }
+                Err(error) => (404, json!({"error": error})),
+            }
+        }
         ("GET", "/api/memory") => {
             let Some(address) = parse_address(query_value(query, "address"), None) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
@@ -2046,6 +2146,32 @@ mod tests {
         config.writes = true;
         config.reads = false;
         assert!(!io_breakpoint_matches_config(&config, &event));
+    }
+
+    #[test]
+    fn x64_disassembly_decodes_and_rebases_addresses() {
+        let target = DebugTarget {
+            title: "test".into(),
+            build_hash: "test".into(),
+            image_base: 0x00007ff600000000,
+            ida_base: 0x140000000,
+            image_size: 0x300000,
+            entry_rva: 0x1000,
+        };
+        let runtime_start = target.image_base + 0x1000;
+        let bytes = [
+            0x48, 0x89, 0x5c, 0x24, 0x10, // mov [rsp+10h],rbx
+            0xe8, 0x01, 0x00, 0x00, 0x00, // call next+1
+            0x90,
+        ];
+        let rows = decode_instructions(&target, runtime_start, &bytes, 3);
+
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0]["address"], "0x140001000");
+        assert_eq!(rows[0]["length"], 5);
+        assert!(rows[0]["text"].as_str().unwrap().starts_with("mov "));
+        assert_eq!(rows[1]["address"], "0x140001005");
+        assert!(rows[1]["text"].as_str().unwrap().contains("0x14000100b"));
     }
 
     #[test]
