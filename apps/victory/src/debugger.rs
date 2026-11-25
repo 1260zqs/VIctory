@@ -299,13 +299,14 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             breakpoints.get(&address).copied()
         };
         let Some(original) = original else {
-            let in_title = address
+            let exception_address = record.ExceptionAddress as usize;
+            let in_title = exception_address
                 .checked_sub(runtime.target.image_base)
                 .is_some_and(|offset| offset < runtime.target.image_size);
             if !in_title {
                 return 0;
             }
-            return handle_title_breakpoint(runtime, context, address);
+            return handle_title_breakpoint(runtime, context, exception_address);
         };
 
         // Restore the original byte. RIP already points at the INT3 address,
@@ -450,8 +451,10 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     control.reason = "exception";
     control.hit_address = Some(address);
     control.hit_thread = Some(thread_id);
-    control.hit_registers = Some(Registers::from(context));
-    control.hit_context = Some(*context);
+    let mut stopped_context = *context;
+    stopped_context.Rip = address as u64;
+    control.hit_registers = Some(Registers::from(&stopped_context));
+    control.hit_context = Some(stopped_context);
     control.exception_code = Some(EXCEPTION_BREAKPOINT);
     control.step_thread = Some(thread_id);
     control.step_breakpoint = None;
@@ -483,7 +486,9 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
 
     // __debugbreak emits a one-byte INT3. Continue skips it; Step skips it
     // and traps after exactly the following native instruction.
-    context.Rip = (address as u64).saturating_add(1);
+    if context.Rip == address as u64 {
+        context.Rip = (address as u64).saturating_add(1);
+    }
     context.EFlags &= !TRAP_FLAG;
     if action == Action::Step {
         context.EFlags |= TRAP_FLAG;
@@ -1312,6 +1317,9 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             };
             match stack_json(runtime, thread_id) {
                 Ok(value) => (200, value),
+                Err(error) if error == "stack inspection requires a paused process" => {
+                    (409, json!({"error": error}))
+                }
                 Err(error) => (404, json!({"error": error})),
             }
         }
