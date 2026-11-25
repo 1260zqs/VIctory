@@ -129,7 +129,7 @@ victory lib-exports <import.lib> [--list]
 victory shader-info [paths...] [--verbose] [--disasm] [--effects]
 victory translate [paths...] [--validate] [--pipelines] [--list] [--jobs N]
 victory translate [paths...] --cache [--pipelines] [--jobs N]
-victory run <exe> [--execute] [--debugger[=PORT]]
+victory run <exe> [--execute] [--debugger[=PORT]] [--break ADDRESS...]
             [--unimplemented trap|zero] [--strict]
             [--console series-x|series-s] [-- <title arguments>]
 victory config
@@ -170,15 +170,26 @@ Then open **http://127.0.0.1:17890**. Override the port with
 
 ### First stop and execution control
 
-The debugger installs a software breakpoint at the title entry point before
-execution starts. The process should stop there automatically. Use **Resume**
-to continue, **Pause** to interrupt execution, and **Step** to execute one
-instruction from a supported instruction breakpoint. A breakpoint hit restores
+No software breakpoints are installed automatically. The title starts
+executing immediately unless one or more startup breakpoints are supplied with
+`--break`. The option is repeatable and accepts hexadecimal IDA or native
+virtual addresses (with or without the `0x` prefix):
+
+```powershell
+# Break at an address
+target\release\victory.exe run <game dir>\<the title's exe> --execute --debugger --break 0x140001000
+
+# Install multiple startup breakpoints
+target\release\victory.exe run <game dir>\<the title's exe> --execute --debugger --break 0x140001000 --break 0x145A91BD0
+```
+
+Use **Resume** to continue, **Pause** to interrupt execution, and **Step** to
+execute one instruction from a supported instruction breakpoint. A breakpoint hit restores
 the original instruction byte, executes that instruction, then rearms the
 breakpoint.
 
-Use the Breakpoints panel to add or remove software breakpoints. Use **Run to**
-to resume until a specified address. Run-to is asynchronous: the request
+Use the Breakpoints panel to add or remove software breakpoints after startup.
+Use **Run to** to resume until a specified address. Run-to is asynchronous: the request
 returns after execution resumes, and the debugger UI waits for the next stop.
 
 ### Addresses, registers and call stack
