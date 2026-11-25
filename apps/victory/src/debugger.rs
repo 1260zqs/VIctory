@@ -443,6 +443,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
 fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: usize) -> i32 {
     // A title-generated INT3 (for example __debugbreak()) is an inspectable
     // stop, not an unhandled exception. All other process breakpoints pass on.
+    // SAFETY: a plain query of the title thread raising the exception.
     let thread_id = unsafe { GetCurrentThreadId() };
     suspend_peers(runtime, &[thread_id]);
 
@@ -728,7 +729,9 @@ fn registers_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
 }
 
 fn stack_bounds(rsp: usize) -> Option<(usize, usize)> {
+    // SAFETY: zeroed is a valid output buffer for MEMORY_BASIC_INFORMATION.
     let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: VirtualQuery writes into the correctly sized structure.
     let read = unsafe {
         VirtualQuery(
             rsp as *const c_void,
@@ -744,7 +747,9 @@ fn stack_bounds(rsp: usize) -> Option<(usize, usize)> {
     let mut cursor = (info.BaseAddress as usize).checked_add(info.RegionSize)?;
     let mut high = cursor;
     for _ in 0..128 {
+        // SAFETY: zeroed is a valid output buffer for MEMORY_BASIC_INFORMATION.
         let mut next: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        // SAFETY: VirtualQuery writes into the correctly sized structure.
         let read = unsafe {
             VirtualQuery(
                 cursor as *const c_void,
