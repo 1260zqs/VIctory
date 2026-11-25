@@ -184,6 +184,17 @@ inside the title image back to native process addresses before reading memory
 or installing an x64 `INT3`. Other process mappings, such as host DLLs and
 thread stacks, retain their native virtual addresses.
 
+The loopback HTTP API also exposes:
+- `GET /api/stack?thread=ID` — unwind the selected thread while paused; frames
+  include IDA/native addresses and a module-relative location.
+- `GET /api/wait?timeout_ms=30000` — wait for the next paused stop instead of
+  polling status.
+- `POST /api/runto?address=0x...` — install a one-shot breakpoint and resume
+  until that address (requires the process to be paused).
+- A title-generated `INT3` / `__debugbreak()` is reported as
+  `reason:"exception"` in `/api/status`; Resume skips the INT3, while Step
+  skips it and stops after the next native instruction.
+
 This is an in-process debugger, not a CPU emulator or a remote debugger.
 Memory reads are capped at 4 KiB per request. Pausing all threads can catch a
 thread while it owns a process-wide lock; keep debugger requests read-focused
