@@ -589,6 +589,14 @@ pub extern "C" fn _wfsopen(path: *const u16, mode: *const u16, share: i32) -> Fi
 // destinations and retry a failed `ReadFile` forever. So the destination
 // is opened first.
 
+pub extern "system" fn CloseHandle(handle: Handle) -> i32 {
+    let result = host!("kernel32.dll", "CloseHandle": extern "system" fn(Handle) -> i32)(handle);
+    if result != 0 {
+        file_paths().lock().unwrap_or_else(|e| e.into_inner()).remove(&(handle as usize));
+    }
+    result
+}
+
 pub extern "system" fn ReadFile(
     file: *mut c_void,
     buffer: *mut u8,
@@ -596,9 +604,23 @@ pub extern "system" fn ReadFile(
     read: *mut u32,
     overlapped: *mut c_void,
 ) -> i32 {
+    notify_handle_io("read", file, "ReadFile", len as usize);
     let _writing = victory_gpu::kernel_will_write(buffer as usize, len as usize);
     host!("kernel32.dll", "ReadFile": extern "system" fn(*mut c_void, *mut u8, u32, *mut u32, *mut c_void) -> i32)(
         file, buffer, len, read, overlapped,
+    )
+}
+
+pub extern "system" fn WriteFile(
+    file: *mut c_void,
+    buffer: *const u8,
+    len: u32,
+    written: *mut u32,
+    overlapped: *mut c_void,
+) -> i32 {
+    notify_handle_io("write", file, "WriteFile", len as usize);
+    host!("kernel32.dll", "WriteFile": extern "system" fn(*mut c_void, *const u8, u32, *mut u32, *mut c_void) -> i32)(
+        file, buffer, len, written, overlapped,
     )
 }
 
@@ -756,6 +778,8 @@ pub(crate) fn module() -> HleModule {
         ],
         exports: vec![
             hle_export!(ReadFile),
+            hle_export!(WriteFile),
+            hle_export!(CloseHandle),
             hle_export!(fread),
             hle_export!(CreateFileW),
             hle_export!(CreateFileA),
