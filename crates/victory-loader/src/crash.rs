@@ -702,6 +702,13 @@ fn unwind(context: CONTEXT) -> Vec<u64> {
     let (mut low, mut high) = (0, 0);
     // SAFETY: writes the current thread's stack bounds.
     unsafe { GetCurrentThreadStackLimits(&mut low, &mut high) };
+    unwind_context(context, low, high)
+}
+
+/// Unwind a saved thread context using the bounds of that thread's stack.
+/// The caller must ensure the stack is readable and remains stable (normally
+/// by capturing the context while the thread is stopped).
+pub fn unwind_context(context: CONTEXT, low: usize, high: usize) -> Vec<u64> {
     let mut frames = Vec::with_capacity(MAX_FRAMES);
     unwind_into(context, low, high, &mut frames);
     frames
