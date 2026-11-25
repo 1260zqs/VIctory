@@ -273,6 +273,7 @@ pub type FileIoObserver = Arc<dyn Fn(FileIoEvent) + Send + Sync + 'static>;
 
 static FILE_IO_OBSERVER: OnceLock<Mutex<Option<FileIoObserver>>> = OnceLock::new();
 static FILE_PATHS: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
+static FD_PATHS: OnceLock<Mutex<HashMap<i32, String>>> = OnceLock::new();
 
 fn observer_slot() -> &'static Mutex<Option<FileIoObserver>> {
     FILE_IO_OBSERVER.get_or_init(|| Mutex::new(None))
@@ -280,6 +281,10 @@ fn observer_slot() -> &'static Mutex<Option<FileIoObserver>> {
 
 fn file_paths() -> &'static Mutex<HashMap<usize, String>> {
     FILE_PATHS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn fd_paths() -> &'static Mutex<HashMap<i32, String>> {
+    FD_PATHS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 /// Installs or removes the runtime debugger's file-I/O observer.
@@ -299,6 +304,23 @@ fn file_path(handle: *mut c_void) -> String {
         .get(&(handle as usize))
         .cloned()
         .unwrap_or_else(|| format!("handle:{:#x}", handle as usize))
+}
+
+pub(crate) fn forget_file_path(handle: *mut c_void) {
+    file_paths().lock().unwrap_or_else(|e| e.into_inner()).remove(&(handle as usize));
+}
+
+fn remember_fd_path(fd: i32, path: String) {
+    if fd >= 0 {
+        fd_paths().lock().unwrap_or_else(|e| e.into_inner()).insert(fd, path);
+    }
+}
+
+fn fd_path(fd: i32) -> String {
+    fd_paths().lock().unwrap_or_else(|e| e.into_inner())
+        .get(&fd)
+        .cloned()
+        .unwrap_or_else(|| format!("fd:{fd}"))
 }
 
 pub(crate) fn notify_file_io(event: FileIoEvent) {
@@ -696,26 +718,60 @@ pub extern "C" fn fopen_s(out: *mut File, path: *const c_char, mode: *const c_ch
 /// `_open(path, flags[, mode])` is variadic; on x64 the optional integer
 /// travels in the same register either way, so it is passed on as is.
 pub extern "C" fn _open(path: *const c_char, flags: i32, mode: i32) -> i32 {
-    match narrow(path) {
+    let title_path = narrow_string(path);
+    let fd = match narrow(path) {
         Some(p) => host!("ucrtbase.dll", "_wopen": extern "C" fn(*const u16, i32, i32) -> i32)(
-            p.as_ptr(),
-            flags,
-            mode,
+            p.as_ptr(), flags, mode,
         ),
         None => host!("ucrtbase.dll", "_open": extern "C" fn(*const c_char, i32, i32) -> i32)(
             path, flags, mode,
         ),
-    }
+    };
+    remember_fd_path(fd, title_path);
+    fd
 }
 
 /// See [`_open`]; used by libHttpClient.
 pub extern "C" fn _wopen(path: *const u16, flags: i32, mode: i32) -> i32 {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("ucrtbase.dll", "_wopen": extern "C" fn(*const u16, i32, i32) -> i32)(
-        p.ptr(),
-        flags,
-        mode,
-    )
+    let fd = host!("ucrtbase.dll", "_wopen": extern "C" fn(*const u16, i32, i32) -> i32)(
+        p.ptr(), flags, mode,
+    );
+    remember_fd_path(fd, title_path);
+    fd
+}
+
+pub extern "C" fn _read(fd: i32, buffer: *mut c_void, count: u32) -> i32 {
+    let path = fd_path(fd);
+    notify_file_io(FileIoEvent {
+        operation: "read".into(),
+        path,
+        api: "_read".into(),
+        size: count as usize,
+        offset: None,
+    });
+    host!("ucrtbase.dll", "_read": extern "C" fn(i32, *mut c_void, u32) -> i32)(fd, buffer, count)
+}
+
+pub extern "C" fn _write(fd: i32, buffer: *const c_void, count: u32) -> i32 {
+    let path = fd_path(fd);
+    notify_file_io(FileIoEvent {
+        operation: "write".into(),
+        path,
+        api: "_write".into(),
+        size: count as usize,
+        offset: None,
+    });
+    host!("ucrtbase.dll", "_write": extern "C" fn(i32, *const c_void, u32) -> i32)(fd, buffer, count)
+}
+
+pub extern "C" fn _close(fd: i32) -> i32 {
+    let result = host!("ucrtbase.dll", "_close": extern "C" fn(i32) -> i32)(fd);
+    if result == 0 {
+        fd_paths().lock().unwrap_or_else(|e| e.into_inner()).remove(&fd);
+    }
+    result
 }
 
 pub extern "C" fn _wstat64(path: *const u16, stat: *mut c_void) -> i32 {
@@ -837,6 +893,9 @@ pub(crate) fn module() -> HleModule {
             hle_export!(fopen_s),
             hle_export!(_open),
             hle_export!(_wopen),
+            hle_export!(_read),
+            hle_export!(_write),
+            hle_export!(_close),
             hle_export!(_wstat64),
             hle_export!(_stat64i32),
             hle_export!(remove),
