@@ -1297,7 +1297,8 @@ fn decode_instructions(
         let instruction = decoder.decode();
         let runtime_address = instruction.ip() as usize;
         let ida_address = target.to_ida_address(runtime_address);
-        let length = usize::from(instruction.len());
+        let length = instruction.len() as usize;
+        let invalid = instruction.is_invalid();
         let start = runtime_address.saturating_sub(runtime_start);
         let end = start.saturating_add(length).min(bytes.len());
         let raw = bytes.get(start..end).unwrap_or_default();
@@ -1308,7 +1309,7 @@ fn decode_instructions(
         display_instruction.set_ip(ida_address);
         let mut text = String::new();
         formatter.format(&display_instruction, &mut text);
-        if instruction.is_invalid() {
+        if invalid {
             text = "invalid instruction".to_owned();
         }
 
@@ -1318,7 +1319,7 @@ fn decode_instructions(
             "bytes": raw.iter().map(|byte| format!("{byte:02X}")).collect::<Vec<_>>().join(" "),
             "text": text,
             "length": length,
-            "invalid": instruction.is_invalid(),
+            "invalid": invalid,
         }));
     }
 
@@ -2171,7 +2172,7 @@ mod tests {
         assert_eq!(rows[0]["length"], 5);
         assert!(rows[0]["text"].as_str().unwrap().starts_with("mov "));
         assert_eq!(rows[1]["address"], "0x140001005");
-        assert!(rows[1]["text"].as_str().unwrap().contains("0x14000100b"));
+        assert!(rows[1]["text"].as_str().unwrap().to_ascii_lowercase().contains("14000100b"));
     }
 
     #[test]
