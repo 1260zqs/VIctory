@@ -144,7 +144,10 @@ extern "system" fn open_file(_: Factory, path: *const u16, iid: *const Guid, out
     tracing::info!(path = name, iid = iid_text(iid), "dstorage: file opened");
     // SAFETY: a handle we just opened and nobody else owns.
     let file = unsafe { std::fs::File::from_raw_handle(handle) };
-    let file = Instance::create(Object::new("dstorage file", &FILE_VTABLE), File { file });
+    let file = Instance::create(
+        Object::new("dstorage file", &FILE_VTABLE),
+        File { file, path: name.clone() },
+    );
     put(out, file)
 }
 
@@ -258,6 +261,7 @@ static FACTORY_VTABLE: Methods<16> = Methods([
 
 struct File {
     file: std::fs::File,
+    path: String,
 }
 
 static FILE_VTABLE: Methods<8> = Methods([
@@ -721,6 +725,18 @@ extern "system" fn enqueue_request(this: QueueRef, request: *const Request) {
     let Some(&request) = (unsafe { request.as_ref() }) else {
         return;
     };
+    if request.options & MEMORY_SOURCE == 0 && !request.source.is_null() {
+        // SAFETY: the title's source is a file object created by open_file;
+        // its reference remains alive until the request completes.
+        let file = unsafe { &*request.source.cast::<Instance<File>>() };
+        super::files::notify_file_io(super::files::FileIoEvent {
+            operation: "read".into(),
+            path: file.state.path.clone(),
+            api: "DirectStorage".into(),
+            size: request.source_size as usize,
+            offset: Some(request.offset),
+        });
+    }
     queue(this, Command::Read(request));
 }
 
