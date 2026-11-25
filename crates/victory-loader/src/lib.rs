@@ -23,6 +23,8 @@
 
 #[cfg(windows)]
 mod crash;
+#[cfg(windows)]
+mod debugger;
 pub mod prepare;
 pub(crate) mod publish;
 pub mod resolve;
@@ -37,6 +39,8 @@ mod tls;
 #[cfg(windows)]
 mod windows;
 
+#[cfg(windows)]
+pub use debugger::wait_for_debugger;
 #[cfg(windows)]
 pub use crash::{
     locate, log_crash, log_crashes_to, note_title_output, report_crashes, report_unhandled,
