@@ -826,6 +826,9 @@ fn set_register(runtime: &Runtime, thread_id: u32, name: &str, value: u64) -> Re
     if control.hit_thread != Some(thread_id) {
         return Err("register writes currently require the thread at the active stop".into());
     }
+    if control.reason == "io-breakpoint" || control.reason == "manual" {
+        return Err("register writes require a native exception stop; I/O and manual stops are snapshots only".into());
+    }
     let mut context = control
         .pending_context
         .or(control.hit_context)
@@ -927,6 +930,133 @@ fn stack_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
     }))
 }
 
+fn io_event_json(event: &victory_hle::modules::files::FileIoEvent) -> Value {
+    json!({
+        "operation": event.operation,
+        "path": event.path,
+        "api": event.api,
+        "size": event.size,
+        "offset": event.offset.map(|value| format!("{value:#x}")),
+    })
+}
+
+fn io_breakpoints_json(runtime: &Runtime) -> Value {
+    let config = runtime.io_breakpoints.lock().unwrap_or_else(|e| e.into_inner());
+    json!({
+        "read": config.reads,
+        "write": config.writes,
+        "path_filter": config.path_filter,
+    })
+}
+
+fn io_events_json(runtime: &Runtime) -> Value {
+    let events = runtime.io_events.lock().unwrap_or_else(|e| e.into_inner());
+    Value::Array(events.iter().map(io_event_json).collect())
+}
+
+fn configure_io_breakpoints(
+    runtime: &Runtime,
+    reads: Option<bool>,
+    writes: Option<bool>,
+    path_filter: Option<String>,
+) -> Value {
+    let mut config = runtime.io_breakpoints.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(reads) = reads {
+        config.reads = reads;
+    }
+    if let Some(writes) = writes {
+        config.writes = writes;
+    }
+    if let Some(path_filter) = path_filter {
+        config.path_filter = path_filter;
+    }
+    json!({
+        "read": config.reads,
+        "write": config.writes,
+        "path_filter": config.path_filter,
+    })
+}
+
+fn io_breakpoint_matches(runtime: &Runtime, event: &victory_hle::modules::files::FileIoEvent) -> bool {
+    let config = runtime.io_breakpoints.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let enabled = match event.operation.as_str() {
+        "read" => config.reads,
+        "write" => config.writes,
+        _ => false,
+    };
+    enabled && (
+        config.path_filter.is_empty()
+            || event.path.to_lowercase().contains(&config.path_filter.to_lowercase())
+    )
+}
+
+fn handle_file_io(
+    runtime: &Runtime,
+    event: victory_hle::modules::files::FileIoEvent,
+) {
+    {
+        let mut events = runtime.io_events.lock().unwrap_or_else(|e| e.into_inner());
+        if events.len() == 100 {
+            events.pop_front();
+        }
+        events.push_back(event.clone());
+    }
+    if !io_breakpoint_matches(runtime, &event) {
+        return;
+    }
+
+    // Capture the initiating title thread here, before ReadFile/WriteFile or
+    // DirectStorage enqueue returns to the caller.
+    let mut context = AlignedContext(unsafe { std::mem::zeroed() });
+    // SAFETY: RtlCaptureContext writes the current x64 thread context.
+    unsafe { RtlCaptureContext(&mut context.0) };
+    // SAFETY: a plain query of the calling title thread ID.
+    let thread_id = unsafe { GetCurrentThreadId() };
+    suspend_peers(runtime, &[thread_id]);
+
+    let mut control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    control.paused = true;
+    control.reason = "io-breakpoint";
+    control.hit_address = Some(context.0.Rip as usize);
+    control.hit_thread = Some(thread_id);
+    control.hit_registers = Some(Registers::from(&context.0));
+    control.hit_context = Some(context.0);
+    control.pending_context = None;
+    control.exception_code = None;
+    control.io_event = Some(event);
+    control.step_thread = None;
+    control.step_breakpoint = None;
+    control.stop_after_instruction = false;
+    control.action = Action::Wait;
+    runtime.changed.notify_all();
+
+    while control.action == Action::Wait {
+        control = runtime.changed.wait(control).unwrap_or_else(|e| e.into_inner());
+    }
+
+    control.paused = false;
+    control.reason = "running";
+    control.hit_address = None;
+    control.hit_thread = None;
+    control.hit_registers = None;
+    control.hit_context = None;
+    control.pending_context = None;
+    control.exception_code = None;
+    control.io_event = None;
+    control.action = Action::Wait;
+    runtime.changed.notify_all();
+    drop(control);
+    resume_peers(runtime);
+}
+
+fn parse_bool_parameter(query: &str, key: &str) -> Option<bool> {
+    query_value(query, key).and_then(|value| match value.to_ascii_lowercase().as_str() {
+        "1" | "true" | "on" | "yes" => Some(true),
+        "0" | "false" | "off" | "no" => Some(false),
+        _ => None,
+    })
+}
+
 fn wait_for_stop(runtime: &Runtime, timeout: Duration) -> Value {
     let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
     let (control, result) = runtime
@@ -974,6 +1104,7 @@ fn status_json(runtime: &Runtime) -> Value {
             }),
             "thread_id": control.hit_thread,
         })),
+        "io_event": control.io_event.as_ref().map(io_event_json),
         "breakpoint_count": breakpoints.len(),
         "uptime_seconds": runtime.started.elapsed().as_secs(),
     })
@@ -1378,6 +1509,21 @@ fn continue_or_step(runtime: &Runtime, step: bool) -> Result<(), String> {
         runtime.changed.notify_all();
         drop(control);
         resume_peers(runtime);
+        return Ok(());
+    }
+    if control.reason == "io-breakpoint" {
+        if step {
+            return Err("single-step is not available at an I/O API breakpoint".into());
+        }
+        control.paused = false;
+        control.reason = "running";
+        control.hit_address = None;
+        control.hit_thread = None;
+        control.hit_registers = None;
+        control.hit_context = None;
+        control.pending_context = None;
+        control.io_event = None;
+        runtime.changed.notify_all();
         return Ok(());
     }
     if control.reason != "breakpoint" && control.reason != "step" && control.reason != "exception" {
