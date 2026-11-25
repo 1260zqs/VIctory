@@ -330,13 +330,68 @@ pub(crate) fn notify_file_io(event: FileIoEvent) {
     }
 }
 
-fn notify_handle_io(operation: &str, handle: *mut c_void, api: &str, size: usize) {
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct FileOverlapped {
+    internal: usize,
+    internal_high: usize,
+    offset: u32,
+    offset_high: u32,
+    event: Handle,
+}
+
+fn overlapped_file_offset(overlapped: *mut c_void) -> Option<u64> {
+    if overlapped.is_null() {
+        return None;
+    }
+    // SAFETY: a non-null ReadFile/WriteFile OVERLAPPED pointer addresses this
+    // Windows ABI structure; read_unaligned avoids relying on caller alignment.
+    let value = unsafe { std::ptr::read_unaligned(overlapped.cast::<FileOverlapped>()) };
+    Some((u64::from(value.offset_high) << 32) | u64::from(value.offset))
+}
+
+fn current_handle_offset(handle: Handle) -> Option<u64> {
+    if handle.is_null() || handle as isize == -1 {
+        return None;
+    }
+    let mut position = 0i64;
+    // FILE_CURRENT with a zero displacement queries the current file pointer
+    // without moving it. Non-seekable handles simply report no offset.
+    let ok = host!("kernel32.dll", "SetFilePointerEx": extern "system" fn(Handle, i64, *mut i64, u32) -> i32)(
+        handle, 0, &mut position, 1,
+    );
+    (ok != 0 && position >= 0).then_some(position as u64)
+}
+
+fn current_stream_offset(stream: File) -> Option<u64> {
+    if stream.is_null() {
+        return None;
+    }
+    let position = host!("ucrtbase.dll", "_ftelli64": extern "C" fn(File) -> i64)(stream);
+    u64::try_from(position).ok()
+}
+
+fn current_fd_offset(fd: i32) -> Option<u64> {
+    if fd < 0 {
+        return None;
+    }
+    let position = host!("ucrtbase.dll", "_telli64": extern "C" fn(i32) -> i64)(fd);
+    u64::try_from(position).ok()
+}
+
+fn notify_handle_io(
+    operation: &str,
+    handle: *mut c_void,
+    api: &str,
+    size: usize,
+    offset: Option<u64>,
+) {
     notify_file_io(FileIoEvent {
         operation: operation.to_owned(),
         path: file_path(handle),
         api: api.to_owned(),
         size,
-        offset: None,
+        offset,
     });
 }
 
@@ -638,7 +693,8 @@ pub extern "system" fn ReadFile(
     read: *mut u32,
     overlapped: *mut c_void,
 ) -> i32 {
-    notify_handle_io("read", file, "ReadFile", len as usize);
+    let offset = overlapped_file_offset(overlapped).or_else(|| current_handle_offset(file));
+    notify_handle_io("read", file, "ReadFile", len as usize, offset);
     let _writing = victory_gpu::kernel_will_write(buffer as usize, len as usize);
     host!("kernel32.dll", "ReadFile": extern "system" fn(*mut c_void, *mut u8, u32, *mut u32, *mut c_void) -> i32)(
         file, buffer, len, read, overlapped,
@@ -652,7 +708,8 @@ pub extern "system" fn WriteFile(
     written: *mut u32,
     overlapped: *mut c_void,
 ) -> i32 {
-    notify_handle_io("write", file, "WriteFile", len as usize);
+    let offset = overlapped_file_offset(overlapped).or_else(|| current_handle_offset(file));
+    notify_handle_io("write", file, "WriteFile", len as usize, offset);
     host!("kernel32.dll", "WriteFile": extern "system" fn(*mut c_void, *const u8, u32, *mut u32, *mut c_void) -> i32)(
         file, buffer, len, written, overlapped,
     )
@@ -660,7 +717,8 @@ pub extern "system" fn WriteFile(
 
 /// The host CRT reads large requests straight into the caller's buffer.
 pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File) -> usize {
-    notify_handle_io("read", stream, "fread", size.saturating_mul(count));
+    let offset = current_stream_offset(stream);
+    notify_handle_io("read", stream, "fread", size.saturating_mul(count), offset);
     let _writing = victory_gpu::kernel_will_write(buffer as usize, size.saturating_mul(count));
     host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize)(
         buffer, size, count, stream,
@@ -668,7 +726,8 @@ pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File
 }
 
 pub extern "C" fn fwrite(buffer: *const u8, size: usize, count: usize, stream: File) -> usize {
-    notify_handle_io("write", stream, "fwrite", size.saturating_mul(count));
+    let offset = current_stream_offset(stream);
+    notify_handle_io("write", stream, "fwrite", size.saturating_mul(count), offset);
     host!("ucrtbase.dll", "fwrite": extern "C" fn(*const u8, usize, usize, File) -> usize)(
         buffer, size, count, stream,
     )
@@ -744,24 +803,26 @@ pub extern "C" fn _wopen(path: *const u16, flags: i32, mode: i32) -> i32 {
 
 pub extern "C" fn _read(fd: i32, buffer: *mut c_void, count: u32) -> i32 {
     let path = fd_path(fd);
+    let offset = current_fd_offset(fd);
     notify_file_io(FileIoEvent {
         operation: "read".into(),
         path,
         api: "_read".into(),
         size: count as usize,
-        offset: None,
+        offset,
     });
     host!("ucrtbase.dll", "_read": extern "C" fn(i32, *mut c_void, u32) -> i32)(fd, buffer, count)
 }
 
 pub extern "C" fn _write(fd: i32, buffer: *const c_void, count: u32) -> i32 {
     let path = fd_path(fd);
+    let offset = current_fd_offset(fd);
     notify_file_io(FileIoEvent {
         operation: "write".into(),
         path,
         api: "_write".into(),
         size: count as usize,
-        offset: None,
+        offset,
     });
     host!("ucrtbase.dll", "_write": extern "C" fn(i32, *const c_void, u32) -> i32)(fd, buffer, count)
 }
