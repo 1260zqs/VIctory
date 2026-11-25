@@ -17,8 +17,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use windows_sys::Win32::Foundation::{
-    CloseHandle, EXCEPTION_BREAKPOINT, EXCEPTION_SINGLE_STEP, HANDLE, INVALID_HANDLE_VALUE,
-    LocalFree,
+    CloseHandle, EXCEPTION_ACCESS_VIOLATION, EXCEPTION_BREAKPOINT, EXCEPTION_ILLEGAL_INSTRUCTION,
+    EXCEPTION_SINGLE_STEP, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
 };
 use windows_sys::Win32::System::Diagnostics::Debug::{
     AddVectoredExceptionHandler, CONTEXT, CONTEXT_FULL_AMD64, EXCEPTION_POINTERS,
@@ -141,6 +141,7 @@ struct Control {
     hit_context: Option<CONTEXT>,
     pending_context: Option<CONTEXT>,
     exception_code: Option<u32>,
+    exception_detail: Option<String>,
     io_event: Option<victory_hle::modules::files::FileIoEvent>,
     action: Action,
     step_thread: Option<u32>,
@@ -202,6 +203,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
             hit_context: None,
             pending_context: None,
             exception_code: None,
+            exception_detail: None,
             io_event: None,
             action: Action::Wait,
             step_thread: None,
@@ -336,6 +338,12 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
     let Some(runtime) = exception_runtime() else {
         return 0;
     };
+
+    if record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION
+        || record.ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION
+    {
+        return handle_native_exception(runtime, context, record);
+    }
 
     if record.ExceptionCode == EXCEPTION_BREAKPOINT {
         let address = breakpoint_address(context);
