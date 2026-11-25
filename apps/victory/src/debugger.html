@@ -16,12 +16,12 @@
   --sans:Inter,"Segoe UI",Arial,sans-serif;
 }
 *{box-sizing:border-box}
-html{min-height:100%;background:var(--bg)}
-body{margin:0;min-height:100vh;background:
+html{height:100%;background:var(--bg);overflow:hidden}
+body{margin:0;height:100vh;min-height:0;background:
   radial-gradient(ellipse at 12% -10%,rgba(255,56,142,.16),transparent 42%),
   radial-gradient(ellipse at 85% 4%,rgba(38,221,255,.13),transparent 36%),
   linear-gradient(180deg,#090a13 0%,#080a12 54%,#0b0d17 100%);
-  color:var(--text);font:13px/1.45 var(--sans);overflow-x:hidden}
+  color:var(--text);font:13px/1.45 var(--sans);overflow:hidden}
 body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.22;
   background-image:linear-gradient(rgba(109,129,175,.11) 1px,transparent 1px),linear-gradient(90deg,rgba(109,129,175,.11) 1px,transparent 1px);
   background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 88%)}
@@ -35,7 +35,7 @@ input,select{min-width:0;background:#0b0e19;border:1px solid #2a3048;border-radi
 input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(83,239,255,.1)}
 input::placeholder{color:#666d86}
 code,.mono{font-family:var(--mono)}
-.topbar{height:68px;position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 26px;
+.topbar{height:62px;position:relative;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 22px;flex:0 0 62px;
   background:rgba(8,10,19,.88);backdrop-filter:blur(18px);border-bottom:1px solid #292e46}
 .brand{display:flex;align-items:center;gap:14px;min-width:220px}
 .logo{width:34px;height:34px;position:relative;display:grid;place-items:center;border:1px solid rgba(83,239,255,.6);border-radius:10px;
@@ -52,22 +52,28 @@ code,.mono{font-family:var(--mono)}
 .btn-cyan{color:#07131a;background:linear-gradient(110deg,#69f5ff,#37cfe6);border:0;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
 .btn-pink{color:white;background:linear-gradient(110deg,#e93b8b,#a92c82);border:0;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
 .btn-quiet{background:#151929}
-main{position:relative;z-index:1;max-width:1900px;margin:0 auto;padding:22px 26px 36px}
-.hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:4px 0 18px}
+main{position:relative;z-index:1;max-width:1900px;height:calc(100vh - 62px);min-height:0;margin:0 auto;padding:12px 18px;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:10px;overflow:hidden}
+.hero{display:flex;justify-content:space-between;align-items:center;gap:24px;margin:0;min-height:48px}
 .eyebrow{font-size:9px;color:var(--cyan);letter-spacing:.24em;text-transform:uppercase;font-weight:900}
 h1{font-size:clamp(20px,2vw,29px);line-height:1.1;margin:7px 0 5px;letter-spacing:.01em}
 .hero p{color:var(--muted);margin:0;font-size:12px}
 .build-chip{display:flex;flex-direction:column;align-items:flex-end;gap:5px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.12em}
 .build-chip strong{font:12px var(--mono);color:#e6eafa;letter-spacing:0}
-.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px;margin:0}
 .metric,.panel{position:relative;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.16)}
-.metric{padding:12px 14px;overflow:hidden}
+.metric{padding:8px 11px;overflow:hidden}
 .metric:after{content:"";position:absolute;left:0;top:0;height:2px;width:52px;background:linear-gradient(90deg,var(--pink),var(--cyan));box-shadow:0 0 12px rgba(83,239,255,.5)}
 .metric .k{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.14em;font-weight:800}
-.metric .v{font:600 13px/1.5 var(--mono);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eaf2ff}
-.layout{display:grid;grid-template-columns:minmax(250px, .82fr) minmax(480px,1.55fr) minmax(300px, .98fr);gap:12px;align-items:start}
-.col{display:flex;flex-direction:column;gap:12px;min-width:0}
-.panel{overflow:hidden}
+.metric .v{font:600 12px/1.4 var(--mono);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eaf2ff}
+.layout{display:grid;grid-template-columns:minmax(210px,.78fr) minmax(380px,1.45fr) minmax(260px,.9fr);gap:10px;align-items:stretch;min-height:0;overflow:hidden}
+.col{display:grid;grid-template-rows:minmax(0,1fr);gap:10px;min-width:0;min-height:0;overflow:hidden}
+.layout>.col:first-child{grid-template-rows:minmax(0,.85fr) minmax(0,1.05fr) minmax(0,.72fr)}
+.layout>.col:nth-child(2){grid-template-rows:minmax(0,.8fr) minmax(0,1.45fr) minmax(0,.8fr) minmax(0,.72fr)}
+.layout>.col:last-child{grid-template-rows:minmax(0,1.55fr) minmax(0,.9fr)}
+.panel{overflow:hidden;display:flex;flex-direction:column;min-width:0;min-height:0}
+.panel-head{flex:0 0 auto}
+.panel-body{min-height:0}
+.panel>.scroll{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}
 .panel-head{min-height:43px;padding:10px 13px;border-bottom:1px solid #282e45;display:flex;justify-content:space-between;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,77,155,.055),rgba(83,239,255,.025))}
 .panel-title{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}
 .panel-title:before{content:"";width:5px;height:14px;border-radius:4px;background:linear-gradient(var(--pink),var(--cyan));box-shadow:0 0 9px rgba(255,77,155,.35)}
@@ -83,7 +89,7 @@ td,th{padding:8px 9px;border-bottom:1px solid rgba(43,50,75,.72);white-space:now
 tbody tr:hover{background:rgba(83,239,255,.055)}
 tbody tr.selected{background:rgba(255,77,155,.1)}
 tbody tr{cursor:pointer}
-.scroll{max-height:270px;overflow:auto;scrollbar-color:#313a58 #0c0f1a;scrollbar-width:thin}
+.scroll{max-height:none;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-color:#313a58 #0c0f1a;scrollbar-width:thin}
 .thread-name{font:11px var(--sans);max-width:170px;overflow:hidden;text-overflow:ellipsis;color:#d4d9e9}
 .empty{padding:18px;text-align:center;color:#747d99;font:11px var(--sans)}
 .regs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
@@ -106,6 +112,11 @@ tbody tr{cursor:pointer}
 .disasm-table td:nth-child(1){width:132px;color:var(--cyan)}
 .disasm-table td:nth-child(2){width:205px;color:#8d98b4}
 .disasm-table td:nth-child(3){color:#eaf0ff;white-space:pre}
+.asm-anchor-spacer td{padding:0!important;border:0!important;pointer-events:none}
+.disasm-panel .panel-body{flex:0 0 auto}
+.disasm-panel>.scroll{flex:1 1 auto;min-height:0;max-height:none;overflow:auto;overflow-anchor:none}
+.stack-panel>.scroll{max-height:none;min-height:0;flex:1 1 auto;overflow:auto}
+.disasm-panel .disasm-table{min-width:100%}
 .disasm-table tr.asm-current{background:rgba(255,77,155,.13);box-shadow:inset 2px 0 var(--pink)}
 .disasm-table tr.asm-current td:nth-child(3){color:#fff}
 .disasm-address{border:0;background:transparent;color:inherit;padding:0;font:inherit}
@@ -131,10 +142,10 @@ tbody tr{cursor:pointer}
 .runtime-grid .v{margin-top:3px;overflow-wrap:anywhere;font:10px var(--mono);color:#e5eaf8}
 .subsection{padding-top:10px;margin-top:10px;border-top:1px solid #282e45}
 .error{color:#ff8ea7}
-.foot{color:#6f7892;font-size:10px;margin-top:16px;display:flex;justify-content:space-between;gap:16px}
-@media(max-width:1450px){.layout{grid-template-columns:minmax(240px,.8fr) minmax(430px,1.4fr)}.layout>.col:last-child{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.layout>.col:last-child>.panel:last-child{grid-column:1/-1}.metrics{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:900px){main{padding:16px}.topbar{padding:0 16px}.layout{grid-template-columns:1fr}.layout>.col:last-child{grid-column:auto;display:flex}.metrics{grid-template-columns:repeat(2,1fr)}.hero{align-items:flex-start;flex-direction:column}.build-chip{align-items:flex-start}.top-right{gap:8px}.brand{min-width:0}}
-@media(max-width:600px){.topbar{height:auto;min-height:62px;align-items:flex-start;padding:12px;flex-direction:column}.top-right{width:100%;justify-content:space-between}.button-row{gap:4px}.button-row button{padding:7px 8px;font-size:10px}main{padding:12px}.metrics{gap:7px}.metric{padding:10px}.runtime-grid{grid-template-columns:1fr}.io-path{flex-direction:column}}
+.foot{display:none}
+@media(max-width:1450px) and (min-width:901px){.layout{grid-template-columns:minmax(190px,.75fr) minmax(340px,1.4fr) minmax(235px,.9fr)}main{padding-left:12px;padding-right:12px}.metrics{gap:6px}.metric{padding:7px 8px}.metric .v{font-size:11px}.panel-head{padding:8px 10px}.panel-body{padding:9px 10px}.col{gap:8px}.layout{gap:8px}}
+@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}body{height:auto;min-height:100vh}.topbar{padding:0 16px}.layout{grid-template-columns:1fr;overflow:visible}.col{display:flex;flex-direction:column;overflow:visible}.layout>.col:first-child,.layout>.col:nth-child(2),.layout>.col:last-child{grid-template-rows:none}.layout>.col:last-child{grid-column:auto;display:flex}.panel{min-height:160px}.panel>.scroll{max-height:320px;min-height:100px}.disasm-panel>.scroll{height:340px;flex:none}.metrics{grid-template-columns:repeat(3,1fr)}.hero{align-items:flex-start;flex-direction:row}.build-chip{align-items:flex-end}.top-right{gap:8px}.brand{min-width:0}main{height:auto;min-height:calc(100vh - 62px);overflow:visible;display:block;padding:14px}.hero{margin-bottom:12px}.metrics{margin-bottom:12px}}
+@media(max-width:600px){.topbar{height:auto;min-height:62px;align-items:flex-start;padding:12px;flex-direction:column}.top-right{width:100%;justify-content:space-between}.button-row{gap:4px}.button-row button{padding:7px 8px;font-size:10px}main{padding:12px}.metrics{grid-template-columns:repeat(2,1fr);gap:7px}.metric{padding:10px}.runtime-grid{grid-template-columns:1fr}.io-path{flex-direction:column}.hero{flex-direction:column}.build-chip{align-items:flex-start}}
 </style>
 </head>
 <body>
@@ -215,7 +226,7 @@ tbody tr{cursor:pointer}
           </div>
           <div class="hint" id="asmInfo" style="margin-top:8px">Intel x64 · Select a stack frame to follow its instruction pointer.</div>
         </div>
-        <div class="scroll" style="max-height:430px">
+        <div class="scroll" id="disasmScroll">
           <table class="disasm-table">
             <thead><tr><th>Address</th><th>Bytes</th><th>Instruction</th></tr></thead>
             <tbody id="disassembly"><tr><td colspan="3" class="empty">Disassembly appears when the process breaks.</td></tr></tbody>
@@ -278,7 +289,7 @@ tbody tr{cursor:pointer}
 const $=id=>document.getElementById(id);
 let latestStatus=null,selectedTid=null,latestThreads=[],selectedRegisters=null;
 let regionCursor="0x0",lastStopKey="",lastStack=[],selectedFrameAddress=null;
-let waitLoopRunning=false;
+let waitLoopRunning=false,disasmLoading=false,disasmHasMore=true,disasmRequestId=0;
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path,method="GET"){
   const response=await fetch(path,{method,cache:"no-store"});
@@ -425,33 +436,84 @@ async function refreshStack(){
     $("stackHeadline").textContent=error.message;
   }
 }
-async function loadDisassembly(address=null){
-  const value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
+function appendDisassemblyRows(rows){
+  const html=rows.map(instruction=>
+    '<tr data-asm-address="'+esc(instruction.address)+'">'+
+    '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
+    '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>'
+  ).join("");
+  $("disassembly").insertAdjacentHTML("beforeend",html);
+  $("disassembly").querySelectorAll("button.disasm-address:not([data-bound])").forEach(button=>{
+    button.dataset.bound="1";
+    button.addEventListener("click",()=>{
+      $("asmAddress").value=button.dataset.address;
+      loadDisassembly(button.dataset.address);
+    });
+  });
+}
+async function loadDisassembly(address=null,append=false){
+  if(disasmLoading|| (append&&!disasmHasMore))return;
+  const scroll=$("disasmScroll");
+  let value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
+  if(append){
+    const previous=$("disassembly").querySelector("tr[data-asm-address]:last-of-type");
+    if(!previous)return;
+    const last=JSON.parse(previous.dataset.instruction||"null");
+    if(!last)return;
+    value="0x"+(BigInt(last.address)+BigInt(last.length)).toString(16);
+  }
   if(!value)return;
-  $("asmAddress").value=value;
-  $("asmState").textContent="DECODING";
+  const requestId=append?disasmRequestId:++disasmRequestId;
+  disasmLoading=true;
+  if(!append){
+    disasmHasMore=true;
+    $("asmAddress").value=value;
+    $("asmState").textContent="DECODING";
+    $("disassembly").innerHTML='<tr class="asm-anchor-spacer" aria-hidden="true"><td colspan="3"></td></tr>';
+    scroll.scrollTop=0;
+  }else{
+    $("asmState").textContent="LOADING";
+  }
   try{
-    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&count=64");
+    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&count=128");
+    if(requestId!==disasmRequestId)return;
     const rows=data.instructions||[];
     $("asmInfo").textContent=data.address+" · runtime "+data.runtime_address+" · "+data.instruction_count+" instructions / "+data.bytes_read+" bytes";
     $("asmInfo").className="hint";
     $("asmState").textContent="X64 / INTEL";
-    $("disassembly").innerHTML=rows.map((instruction,index)=>
-      '<tr class="'+(index===0?"asm-current":"")+'" data-asm-address="'+esc(instruction.address)+'">'+
-      '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
-      '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>'
-    ).join("")||'<tr><td colspan="3" class="empty">No instructions decoded.</td></tr>';
-    $("disassembly").querySelectorAll("[data-address]").forEach(button=>button.addEventListener("click",()=>{
-      $("asmAddress").value=button.dataset.address;
-      loadDisassembly(button.dataset.address);
-    }));
-    const current=$("disassembly").querySelector(".asm-current");
-    if(current)current.scrollIntoView({block:"nearest"});
+    if(!append){
+      const first=rows[0];
+      const spacerHeight=Math.max(0,Math.floor((scroll.clientHeight-24)/2));
+      $("disassembly").innerHTML='<tr class="asm-anchor-spacer" aria-hidden="true" style="height:'+spacerHeight+'px"><td colspan="3"></td></tr>';
+      if(first)first.is_anchor=true;
+    }
+    for(const instruction of rows)instruction.dataset=undefined;
+    const html=rows.map((instruction,index)=>{
+      const current=!append&&index===0;
+      return '<tr '+(current?'class="asm-current" ':'')+'data-asm-address="'+esc(instruction.address)+'" data-instruction="'+esc(JSON.stringify(instruction))+'">'+
+        '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
+        '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>';
+    }).join("");
+    $("disassembly").insertAdjacentHTML("beforeend",html);
+    $("disassembly").querySelectorAll("button.disasm-address:not([data-bound])").forEach(button=>{
+      button.dataset.bound="1";
+      button.addEventListener("click",()=>{
+        $("asmAddress").value=button.dataset.address;
+        loadDisassembly(button.dataset.address);
+      });
+    });
+    disasmHasMore=rows.length===128;
+    if(!append)scroll.scrollTop=0;
   }catch(error){
-    $("asmState").textContent="UNAVAILABLE";
-    $("asmInfo").textContent=error.message;
-    $("asmInfo").className="error";
-    $("disassembly").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';
+    if(requestId===disasmRequestId){
+      disasmHasMore=false;
+      $("asmState").textContent="UNAVAILABLE";
+      $("asmInfo").textContent=error.message;
+      $("asmInfo").className="error";
+      $("disassembly").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';
+    }
+  }finally{
+    if(requestId===disasmRequestId)disasmLoading=false;
   }
 }
 async function refreshStatus(){
@@ -561,6 +623,10 @@ $("moreRegions").addEventListener("click",()=>loadRegions(true));
 $("readMemory").addEventListener("click",loadMemory);
 $("memoryAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadMemory();});
 $("refreshStack").addEventListener("click",refreshStack);
+$("disasmScroll").addEventListener("scroll",()=>{
+  const element=$("disasmScroll");
+  if(element.scrollTop+element.clientHeight>=element.scrollHeight-180)loadDisassembly(null,true);
+});
 $("disasmGo").addEventListener("click",()=>loadDisassembly($("asmAddress").value.trim()));
 $("asmAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadDisassembly($("asmAddress").value.trim());});
 $("disasmStop").addEventListener("click",()=>{
