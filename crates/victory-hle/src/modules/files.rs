@@ -570,21 +570,28 @@ pub extern "C" fn _wfopen(path: *const u16, mode: *const u16) -> File {
 }
 
 pub extern "C" fn _wfopen_s(out: *mut File, path: *const u16, mode: *const u16) -> i32 {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("ucrtbase.dll", "_wfopen_s": extern "C" fn(*mut File, *const u16, *const u16) -> i32)(
-        out,
-        p.ptr(),
-        mode,
-    )
+    let result = host!("ucrtbase.dll", "_wfopen_s": extern "C" fn(*mut File, *const u16, *const u16) -> i32)(
+        out, p.ptr(), mode,
+    );
+    if result == 0 && !out.is_null() {
+        // SAFETY: a successful fopen_s writes the opened FILE pointer to out.
+        remember_file_path(unsafe { *out }, title_path);
+    }
+    result
 }
 
 pub extern "C" fn _wfsopen(path: *const u16, mode: *const u16, share: i32) -> File {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("ucrtbase.dll", "_wfsopen": extern "C" fn(*const u16, *const u16, i32) -> File)(
-        p.ptr(),
-        mode,
-        share,
-    )
+    let stream = host!("ucrtbase.dll", "_wfsopen": extern "C" fn(*const u16, *const u16, i32) -> File)(
+        p.ptr(), mode, share,
+    );
+    if !stream.is_null() {
+        remember_file_path(stream, title_path);
+    }
+    stream
 }
 
 // Kernel reads into title memory. The GPU side leaves blocks of title GPU
@@ -638,6 +645,21 @@ pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File
     )
 }
 
+pub extern "C" fn fwrite(buffer: *const u8, size: usize, count: usize, stream: File) -> usize {
+    notify_handle_io("write", stream, "fwrite", size.saturating_mul(count));
+    host!("ucrtbase.dll", "fwrite": extern "C" fn(*const u8, usize, usize, File) -> usize)(
+        buffer, size, count, stream,
+    )
+}
+
+pub extern "C" fn fclose(stream: File) -> i32 {
+    let result = host!("ucrtbase.dll", "fclose": extern "C" fn(File) -> i32)(stream);
+    if result == 0 {
+        file_paths().lock().unwrap_or_else(|e| e.into_inner()).remove(&(stream as usize));
+    }
+    result
+}
+
 pub extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> File {
     let title_path = narrow_string(path);
     let stream = match narrow(path) {
@@ -655,20 +677,20 @@ pub extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> File {
 }
 
 pub extern "C" fn fopen_s(out: *mut File, path: *const c_char, mode: *const c_char) -> i32 {
-    match narrow(path) {
-        Some(p) => {
-            host!("ucrtbase.dll", "_wfopen_s": extern "C" fn(*mut File, *const u16, *const u16) -> i32)(
-                out,
-                p.as_ptr(),
-                widen(mode).as_ptr(),
-            )
-        }
-        None => {
-            host!("ucrtbase.dll", "fopen_s": extern "C" fn(*mut File, *const c_char, *const c_char) -> i32)(
-                out, path, mode,
-            )
-        }
+    let title_path = narrow_string(path);
+    let result = match narrow(path) {
+        Some(p) => host!("ucrtbase.dll", "_wfopen_s": extern "C" fn(*mut File, *const u16, *const u16) -> i32)(
+            out, p.as_ptr(), widen(mode).as_ptr(),
+        ),
+        None => host!("ucrtbase.dll", "fopen_s": extern "C" fn(*mut File, *const c_char, *const c_char) -> i32)(
+            out, path, mode,
+        ),
+    };
+    if result == 0 && !out.is_null() {
+        // SAFETY: a successful fopen_s writes the opened FILE pointer to out.
+        remember_file_path(unsafe { *out }, title_path);
     }
+    result
 }
 
 /// `_open(path, flags[, mode])` is variadic; on x64 the optional integer
@@ -789,6 +811,8 @@ pub(crate) fn module() -> HleModule {
             hle_export!(WriteFile),
             hle_export!(CloseHandle),
             hle_export!(fread),
+            hle_export!(fwrite),
+            hle_export!(fclose),
             hle_export!(CreateFileW),
             hle_export!(CreateFileA),
             hle_export!(CreateFile2),
