@@ -13,10 +13,11 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(clippy::too_many_arguments)]
 
+use std::collections::HashMap;
 use std::ffi::{CStr, c_char, c_void};
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use windows_sys::Win32::Globalization::{CP_ACP, MultiByteToWideChar};
 use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
@@ -257,6 +258,83 @@ fn widen(mode: *const c_char) -> Vec<u16> {
 
 type Handle = *mut c_void;
 type File = *mut c_void;
+
+/// A file operation intercepted at the title's HLE boundary.
+#[derive(Clone, Debug)]
+pub struct FileIoEvent {
+    pub operation: String,
+    pub path: String,
+    pub api: String,
+    pub size: usize,
+    pub offset: Option<u64>,
+}
+
+pub type FileIoObserver = Arc<dyn Fn(FileIoEvent) + Send + Sync + 'static>;
+
+static FILE_IO_OBSERVER: OnceLock<Mutex<Option<FileIoObserver>>> = OnceLock::new();
+static FILE_PATHS: OnceLock<Mutex<HashMap<usize, String>>> = OnceLock::new();
+
+fn observer_slot() -> &'static Mutex<Option<FileIoObserver>> {
+    FILE_IO_OBSERVER.get_or_init(|| Mutex::new(None))
+}
+
+fn file_paths() -> &'static Mutex<HashMap<usize, String>> {
+    FILE_PATHS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Installs or removes the runtime debugger's file-I/O observer.
+pub fn set_file_io_observer(observer: Option<FileIoObserver>) {
+    *observer_slot().lock().unwrap_or_else(|e| e.into_inner()) = observer;
+}
+
+fn remember_file_path(handle: *mut c_void, path: String) {
+    if !handle.is_null() && handle as isize != -1 {
+        file_paths().lock().unwrap_or_else(|e| e.into_inner())
+            .insert(handle as usize, path);
+    }
+}
+
+fn file_path(handle: *mut c_void) -> String {
+    file_paths().lock().unwrap_or_else(|e| e.into_inner())
+        .get(&(handle as usize))
+        .cloned()
+        .unwrap_or_else(|| format!("handle:{:#x}", handle as usize))
+}
+
+pub(crate) fn notify_file_io(event: FileIoEvent) {
+    let observer = observer_slot().lock().unwrap_or_else(|e| e.into_inner()).clone();
+    if let Some(observer) = observer {
+        observer(event);
+    }
+}
+
+fn notify_handle_io(operation: &str, handle: *mut c_void, api: &str, size: usize) {
+    notify_file_io(FileIoEvent {
+        operation: operation.to_owned(),
+        path: file_path(handle),
+        api: api.to_owned(),
+        size,
+        offset: None,
+    });
+}
+
+fn wide_string(path: *const u16) -> String {
+    if path.is_null() {
+        return String::new();
+    }
+    // SAFETY: title file APIs receive NUL-terminated UTF-16 paths.
+    let len = unsafe { (0..).take_while(|&i| *path.add(i) != 0).count() };
+    // SAFETY: the pointer addresses len readable UTF-16 code units.
+    String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(path, len) })
+}
+
+fn narrow_string(path: *const c_char) -> String {
+    if path.is_null() {
+        return String::new();
+    }
+    // SAFETY: title file APIs receive NUL-terminated ANSI paths.
+    unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned()
+}
 
 // kernel32 and its file API sets.
 
