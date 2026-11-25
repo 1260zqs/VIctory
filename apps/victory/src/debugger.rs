@@ -145,10 +145,11 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
     anyhow::ensure!(!handler.is_null(), "AddVectoredExceptionHandler failed");
 
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let server_runtime = runtime.clone();
     thread::Builder::new()
         .name("victory-debug-http".into())
         .spawn(move || {
-            runtime
+            server_runtime
                 .server_thread
                 // SAFETY: a plain query of the calling server thread.
                 .store(unsafe { GetCurrentThreadId() }, Ordering::Release);
@@ -156,7 +157,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
             tracing::info!(%address, "runtime debugger listening");
             for connection in listener.incoming() {
                 match connection {
-                    Ok(stream) => serve(stream, &runtime, address.port()),
+                    Ok(stream) => serve(stream, &server_runtime, address.port()),
                     Err(error) => tracing::warn!(%error, "debugger HTTP accept failed"),
                 }
             }
