@@ -1600,6 +1600,7 @@ fn continue_or_step(runtime: &Runtime, step: bool) -> Result<(), String> {
         if step {
             return Err("single-step is not available at an I/O API breakpoint".into());
         }
+        control.action = Action::Continue;
         control.paused = false;
         control.reason = "running";
         control.hit_address = None;
