@@ -266,6 +266,13 @@ fn exception_runtime() -> Option<&'static Arc<Runtime>> {
     RUNTIME.get()
 }
 
+// Windows has already adjusted CONTEXT.Rip to the address of the INT3
+// instruction before dispatching EXCEPTION_BREAKPOINT to user mode.
+#[inline]
+fn breakpoint_address(context: &CONTEXT) -> usize {
+    context.Rip as usize
+}
+
 unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     if info.is_null() {
         return 0;
@@ -280,7 +287,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
     };
 
     if record.ExceptionCode == EXCEPTION_BREAKPOINT {
-        let address = context.Rip.saturating_sub(1) as usize;
+        let address = breakpoint_address(context);
         let original = {
             let breakpoints = runtime.breakpoints.lock().unwrap_or_else(|e| e.into_inner());
             breakpoints.get(&address).copied()
@@ -289,13 +296,12 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             return 0;
         };
 
-        // Restore the original instruction byte, rewind RIP, and use TF to
-        // regain control after exactly one native instruction has executed.
+        // Restore the original byte. RIP already points at the INT3 address,
+        // so leave it there and execute the original instruction with TF set.
         // SAFETY: the breakpoint was installed by this debugger at this address.
         if unsafe { write_code_byte(address, original) }.is_err() {
             return 0;
         }
-        context.Rip = address as u64;
         context.EFlags |= TRAP_FLAG;
         // SAFETY: a plain query of the title thread that raised the breakpoint.
         let thread_id = unsafe { GetCurrentThreadId() };
@@ -1167,6 +1173,14 @@ fn respond(stream: &mut TcpStream, status: u16, content_type: &str, body: &str) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn breakpoint_context_rip_is_the_int3_address() {
+        let mut context = AlignedContext(unsafe { std::mem::zeroed() });
+        context.0.Rip = 0x00007ff908101ec8;
+
+        assert_eq!(breakpoint_address(&context.0), 0x00007ff908101ec8);
+    }
 
     #[test]
     fn address_parser_accepts_hex_addresses() {
