@@ -560,8 +560,13 @@ pub extern "system" fn SetCurrentDirectoryA(path: *const c_char) -> i32 {
 // The C runtime (ucrtbase, which the title's CRT imports bind to).
 
 pub extern "C" fn _wfopen(path: *const u16, mode: *const u16) -> File {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("ucrtbase.dll", "_wfopen": extern "C" fn(*const u16, *const u16) -> File)(p.ptr(), mode)
+    let stream = host!("ucrtbase.dll", "_wfopen": extern "C" fn(*const u16, *const u16) -> File)(p.ptr(), mode);
+    if !stream.is_null() {
+        remember_file_path(stream, title_path);
+    }
+    stream
 }
 
 pub extern "C" fn _wfopen_s(out: *mut File, path: *const u16, mode: *const u16) -> i32 {
@@ -626,6 +631,7 @@ pub extern "system" fn WriteFile(
 
 /// The host CRT reads large requests straight into the caller's buffer.
 pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File) -> usize {
+    notify_handle_io("read", stream, "fread", size.saturating_mul(count));
     let _writing = victory_gpu::kernel_will_write(buffer as usize, size.saturating_mul(count));
     host!("ucrtbase.dll", "fread": extern "C" fn(*mut u8, usize, usize, File) -> usize)(
         buffer, size, count, stream,
@@ -633,17 +639,19 @@ pub extern "C" fn fread(buffer: *mut u8, size: usize, count: usize, stream: File
 }
 
 pub extern "C" fn fopen(path: *const c_char, mode: *const c_char) -> File {
-    match narrow(path) {
+    let title_path = narrow_string(path);
+    let stream = match narrow(path) {
         Some(p) => host!("ucrtbase.dll", "_wfopen": extern "C" fn(*const u16, *const u16) -> File)(
-            p.as_ptr(),
-            widen(mode).as_ptr(),
+            p.as_ptr(), widen(mode).as_ptr(),
         ),
-        None => {
-            host!("ucrtbase.dll", "fopen": extern "C" fn(*const c_char, *const c_char) -> File)(
-                path, mode,
-            )
-        }
+        None => host!("ucrtbase.dll", "fopen": extern "C" fn(*const c_char, *const c_char) -> File)(
+            path, mode,
+        ),
+    };
+    if !stream.is_null() {
+        remember_file_path(stream, title_path);
     }
+    stream
 }
 
 pub extern "C" fn fopen_s(out: *mut File, path: *const c_char, mode: *const c_char) -> i32 {
