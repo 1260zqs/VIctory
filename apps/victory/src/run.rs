@@ -191,7 +191,7 @@ pub fn run(
             crate::debugger::DebugTarget {
                 title: exe.file_name().map(|name| name.to_string_lossy().into_owned())
                     .unwrap_or_else(|| exe.display().to_string()),
-                build_hash: hash.clone(),
+                build_hash: hash.to_string(),
                 image_base: image.base(),
                 preferred_base: image.info().image_base,
                 image_size: image.info().size_of_image as usize,
