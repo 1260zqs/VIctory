@@ -212,10 +212,16 @@ fn write_ida_debug_map(
     let info = image.info();
     let runtime_base = image.base();
     let ida_base = info.image_base;
+    let runtime_module_name = runtime_module_path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
     let contents = format!(
-        "format=VICTORY_IDA_DEBUG_MAP_V1\nsource_executable={}\nbuild_blake3={}\nruntime_module_path={}\nida_image_base={:#x}\nruntime_base={:#x}\nimage_size={:#x}\nentry_rva={:#x}\nentry_ida={:#x}\nentry_runtime={:#x}\naddress_rule=runtime_base+(ida_ea-ida_image_base)\n",
+        "format=VICTORY_IDA_DEBUG_MAP_V1\nprocess_id={}\nsource_executable={}\nbuild_blake3={}\nruntime_module_name={}\nruntime_module_path={}\nida_image_base={:#x}\nruntime_base={:#x}\nimage_size={:#x}\nentry_rva={:#x}\nentry_ida={:#x}\nentry_runtime={:#x}\naddress_rule=runtime_base+(ida_ea-ida_image_base)\n",
+        std::process::id(),
         exe.display(),
         build_hash,
+        runtime_module_name,
         runtime_module_path.display(),
         ida_base,
         runtime_base,
@@ -224,6 +230,10 @@ fn write_ida_debug_map(
         ida_base + u64::from(info.entry_rva),
         runtime_base + info.entry_rva as usize,
     );
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating IDA debug map folder {}", parent.display()))?;
+    }
     std::fs::write(path, contents)
         .with_context(|| format!("writing IDA debug map {}", path.display()))?;
     Ok(())
