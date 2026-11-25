@@ -2418,33 +2418,12 @@ mod tests {
     }
 
     #[test]
-    fn default_winmain_breakpoint_is_rebased_from_ida_space() {
-        let target = DebugTarget {
-            title: "test".into(),
-            build_hash: "test".into(),
-            image_base: 0x00007ff600000000,
-            ida_base: 0x140000000,
-            image_size: 0x06000000,
-            entry_rva: 0x1000,
-        };
-        let expected = target.image_base + 0x05a91bd0;
-
-        assert_eq!(default_winmain_address(&target), Some(expected));
-        assert_eq!(target.to_ida_address(expected), DEFAULT_WINMAIN_IDA_ADDRESS);
-    }
-
-    #[test]
-    fn default_winmain_breakpoint_is_skipped_outside_title_image() {
-        let target = DebugTarget {
-            title: "test".into(),
-            build_hash: "test".into(),
-            image_base: 0x00007ff600000000,
-            ida_base: 0x140000000,
-            image_size: 0x300000,
-            entry_rva: 0x1000,
-        };
-
-        assert_eq!(default_winmain_address(&target), None);
+    fn startup_breakpoint_parser_accepts_ida_and_native_hex_addresses() {
+        assert_eq!(parse_startup_breakpoint_address("0x140001000").unwrap(), 0x140001000);
+        assert_eq!(parse_startup_breakpoint_address("140001000").unwrap(), 0x140001000);
+        assert_eq!(parse_startup_breakpoint_address("0X7FF600001000").unwrap(), 0x7FF600001000);
+        assert!(parse_startup_breakpoint_address("").is_err());
+        assert!(parse_startup_breakpoint_address("not-an-address").is_err());
     }
 
     #[test]
