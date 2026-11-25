@@ -14,7 +14,7 @@ input{background:#0c1219;border:1px solid var(--line);border-radius:6px;padding:
 .subbrand{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0}
 .actions{display:flex;gap:8px;align-items:center}.state{display:flex;align-items:center;gap:8px;margin-right:12px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #58d69b55}.dot.paused{background:var(--amber);box-shadow:0 0 12px #e8bc6855}
 .primary{background:#26466f;border-color:#416b9e}.danger{border-color:#683d42;background:#321d22;color:#ffb6b6}
-main{max-width:1680px;margin:0 auto;padding:18px 22px 32px}.summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}
+main{max-width:1680px;margin:0 auto;padding:18px 22px 32px}.summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
 .metric,.panel{background:var(--panel);border:1px solid var(--line);border-radius:9px}.metric{padding:12px 14px;min-width:0}.metric .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}.metric .v{font:600 14px/1.4 Consolas,monospace;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .layout{display:grid;grid-template-columns:minmax(300px, .9fr) minmax(440px,1.25fr) minmax(360px,1fr);gap:12px;align-items:start}
 .col{display:flex;flex-direction:column;gap:12px;min-width:0}.panel{overflow:hidden}.panel-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}.hint{color:var(--muted);font-size:11px}.panel-body{padding:12px 14px}.toolbar{display:flex;gap:7px;align-items:center}.toolbar input{min-width:0;flex:1}
@@ -38,9 +38,10 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
 <main>
   <section class="summary">
     <div class="metric"><div class="k">Process</div><div class="v" id="pid">—</div></div>
-    <div class="metric"><div class="k">Runtime image base</div><div class="v" id="base">—</div></div>
-    <div class="metric"><div class="k">Image size</div><div class="v" id="imageSize">—</div></div>
-    <div class="metric"><div class="k">Entry point</div><div class="v" id="entry">—</div></div>
+    <div class="metric"><div class="k">IDA image base</div><div class="v" id="idaBase">—</div></div>
+    <div class="metric"><div class="k">Runtime image base</div><div class="v" id="runtimeBase">—</div></div>
+    <div class="metric"><div class="k">Rebase delta</div><div class="v" id="rebaseDelta">—</div></div>
+    <div class="metric"><div class="k">Entry point (IDA VA)</div><div class="v" id="entry">—</div></div>
     <div class="metric"><div class="k">Breakpoints</div><div class="v" id="bpCount">0</div></div>
   </section>
 
@@ -65,7 +66,7 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Memory viewer</span><span class="hint">ReadProcessMemory</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="memoryAddress" value="" placeholder="Address, e.g. 0x7FF900001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
+          <div class="toolbar"><input id="memoryAddress" value="" placeholder="IDA VA, e.g. 0x140001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
           <div id="memoryInfo" class="hint" style="margin:9px 0">Enter an address or click a memory region.</div>
           <div id="memoryView" class="memory">No memory loaded.</div>
         </div>
@@ -76,8 +77,8 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Software breakpoints</span><span class="tag">INT3</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="breakpointAddress" placeholder="Runtime address, e.g. 0x7FF90BC71EC8"><button id="addBreakpoint" class="primary">Add</button></div>
-          <div class="hint" style="margin-top:8px">Addresses are runtime virtual addresses. IDA EAs can be converted with the preferred/runtime image bases above.</div>
+          <div class="toolbar"><input id="breakpointAddress" placeholder="IDA VA, e.g. 0x140123456"><button id="addBreakpoint" class="primary">Add</button></div>
+          <div class="hint" style="margin-top:8px">Paste IDA EAs directly. Title-image addresses are translated to their runtime mapping; other process addresses remain native.</div>
         </div>
         <div class="scroll"><table><thead><tr><th>Address</th><th>Original</th><th></th></tr></thead><tbody id="breakpoints"><tr><td colspan="3" class="empty">No breakpoints set.</td></tr></tbody></table></div>
       </div>
@@ -86,14 +87,14 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
         <div class="panel-body">
           <div class="hint">Title</div><div id="title" style="margin-bottom:10px">—</div>
           <div class="hint">Build BLAKE3</div><div id="hash" style="font:11px Consolas,monospace;overflow-wrap:anywhere;margin:4px 0 12px">—</div>
-          <div class="hint">Preferred image base</div><div id="preferredBase" style="font:12px Consolas,monospace;margin-top:4px">—</div>
+          <div class="hint">Image size</div><div id="imageSize" style="font:12px Consolas,monospace;margin-top:4px">—</div>
           <div class="hint" style="margin-top:12px">Stop reason</div><div id="stopReason" style="margin-top:4px">—</div>
           <div class="hint" style="margin-top:12px">Debugger endpoint</div><div style="font:12px Consolas,monospace;margin-top:4px">127.0.0.1 (loopback only)</div>
         </div>
       </div>
     </div>
   </section>
-  <div class="foot">VIctory inspects its own native x64 process. Memory addresses and register values are shown as hexadecimal strings to preserve 64-bit precision.</div>
+  <div class="foot">VIctory inspects its own native x64 process. Title-image addresses are displayed in the IDA address space; the runtime image base and rebase delta are shown above. Other process mappings retain their native addresses.</div>
 </main>
 <script>
 const $=id=>document.getElementById(id);
@@ -116,13 +117,15 @@ function renderStatus(s){
   $("continueBtn").disabled=!paused;
   $("stepBtn").disabled=!paused||s.reason==="manual";
   $("pid").textContent=s.pid;
-  $("base").textContent=s.base;
+  $("idaBase").textContent=s.ida_base;
+  $("runtimeBase").textContent=s.runtime_base;
+  $("rebaseDelta").textContent=s.rebase_delta;
   $("imageSize").textContent=s.image_size;
-  $("entry").textContent=s.entry_runtime;
+  $("entry").textContent=s.entry_address;
   $("bpCount").textContent=s.breakpoint_count;
   $("title").textContent=s.title;
   $("hash").textContent=s.build_hash;
-  $("preferredBase").textContent=s.preferred_base;
+
   $("uptime").textContent=s.uptime_seconds+" sec";
   $("stopReason").textContent=s.hit_address?s.reason+" at "+s.hit_address+" (TID "+s.hit_thread+")":s.reason;
 }
