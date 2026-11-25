@@ -98,8 +98,18 @@ tbody tr{cursor:pointer}
 .stack-table td:nth-child(3){color:#e8ebf7}
 .stack-table tr.title-frame td:nth-child(3){color:#ff9bc2}
 .stack-table tr.current-frame{background:rgba(255,77,155,.1)}
+.stack-table tr.asm-selected{outline:1px solid rgba(83,239,255,.4);outline-offset:-1px;background:rgba(83,239,255,.08)}
 .stack-frame{border:0;background:transparent;padding:0;color:inherit;font:inherit;text-align:left}
 .stack-frame:hover{color:var(--cyan);text-decoration:underline;box-shadow:none;transform:none}
+.disasm-table{font:11px/1.5 var(--mono)}
+.disasm-table td{padding-top:6px;padding-bottom:6px}
+.disasm-table td:nth-child(1){width:132px;color:var(--cyan)}
+.disasm-table td:nth-child(2){width:205px;color:#8d98b4}
+.disasm-table td:nth-child(3){color:#eaf0ff;white-space:pre}
+.disasm-table tr.asm-current{background:rgba(255,77,155,.13);box-shadow:inset 2px 0 var(--pink)}
+.disasm-table tr.asm-current td:nth-child(3){color:#fff}
+.disasm-address{border:0;background:transparent;color:inherit;padding:0;font:inherit}
+.disasm-address:hover{color:var(--cyan);text-decoration:underline;box-shadow:none;transform:none}
 .toolbar{display:flex;gap:7px;align-items:center}
 .toolbar input{min-width:0;flex:1}
 .memory{font:10px/1.65 var(--mono);white-space:pre;overflow:auto;background:#080c16;border:1px solid #252b42;border-radius:7px;padding:10px;min-height:135px;color:#c9d8eb}
@@ -195,6 +205,24 @@ tbody tr{cursor:pointer}
         <div class="scroll" style="max-height:360px"><table class="stack-table"><thead><tr><th>#</th><th>Address</th><th>Module / function</th></tr></thead><tbody id="stackFrames"><tr><td colspan="3" class="empty">Run until a breakpoint or I/O event is hit.</td></tr></tbody></table></div>
       </div>
 
+      <div class="panel disasm-panel">
+        <div class="panel-head"><span class="panel-title">Disassembly</span><span class="tag cyan" id="asmState">WAITING FOR STOP</span></div>
+        <div class="panel-body">
+          <div class="toolbar">
+            <input id="asmAddress" placeholder="IDA / native instruction address">
+            <button id="disasmGo" class="btn-cyan">Go</button>
+            <button id="disasmStop" class="btn-quiet">At stop</button>
+          </div>
+          <div class="hint" id="asmInfo" style="margin-top:8px">Intel x64 · Select a stack frame to follow its instruction pointer.</div>
+        </div>
+        <div class="scroll" style="max-height:430px">
+          <table class="disasm-table">
+            <thead><tr><th>Address</th><th>Bytes</th><th>Instruction</th></tr></thead>
+            <tbody id="disassembly"><tr><td colspan="3" class="empty">Disassembly appears when the process breaks.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Memory inspector</span><span class="hint">READ / WRITE PROCESS MEMORY</span></div>
         <div class="panel-body">
@@ -249,7 +277,7 @@ tbody tr{cursor:pointer}
 <script>
 const $=id=>document.getElementById(id);
 let latestStatus=null,selectedTid=null,latestThreads=[],selectedRegisters=null;
-let regionCursor="0x0",lastStopKey="",lastStack=[];
+let regionCursor="0x0",lastStopKey="",lastStack=[],selectedFrameAddress=null;
 let waitLoopRunning=false;
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path,method="GET"){
@@ -310,6 +338,7 @@ function renderStatus(s){
     const stopKey=[s.reason,s.hit_address,s.hit_thread,event.operation,event.path,event.api].join("|");
     if(stopKey!==lastStopKey){
       lastStopKey=stopKey;
+      selectedFrameAddress=null;
       if(s.hit_thread!==null&&s.hit_thread!==undefined)selectedTid=s.hit_thread;
       refreshThreads();
       refreshRegisters();
@@ -356,6 +385,14 @@ function isTitleFrame(frame){
 }
 function renderStack(data){
   lastStack=data.frames||[];
+  if(!lastStack.some(frame=>frame.address===selectedFrameAddress)){
+    let initial=0;
+    if(latestStatus?.reason==="io-breakpoint"){
+      const titleIndex=lastStack.findIndex(isTitleFrame);
+      if(titleIndex>=0)initial=titleIndex;
+    }
+    selectedFrameAddress=lastStack[initial]?.address||null;
+  }
   $("stackCount").textContent=lastStack.length+" FRAMES";
   const exception=latestStatus?.exception;
   const exceptionText=exception?(exception.code+(exception.detail?" · "+exception.detail:"")):null;
@@ -366,12 +403,17 @@ function renderStack(data){
   $("stackFrames").innerHTML=lastStack.map(frame=>{
     const isTitle=isTitleFrame(frame);
     const current=frame.index===0;
-    return '<tr class="'+(isTitle?"title-frame ":"")+(current?"current-frame":"")+'"><td>'+frame.index+'</td><td><button class="stack-frame" data-address="'+esc(frame.address)+'">'+esc(frame.address)+'</button></td><td>'+esc(frame.location)+'</td></tr>';
+    const selected=frame.address===selectedFrameAddress;
+    return '<tr data-frame-address="'+esc(frame.address)+'" class="'+(isTitle?"title-frame ":"")+(current?"current-frame ":"")+(selected?"asm-selected":"")+'"><td>'+frame.index+'</td><td><button class="stack-frame" data-address="'+esc(frame.address)+'">'+esc(frame.address)+'</button></td><td>'+esc(frame.location)+'</td></tr>';
   }).join("")||'<tr><td colspan="3" class="empty">No frames recovered.</td></tr>';
   $("stackFrames").querySelectorAll("[data-address]").forEach(button=>button.addEventListener("click",()=>{
-    $("memoryAddress").value=button.dataset.address;
+    selectedFrameAddress=button.dataset.address;
+    $("memoryAddress").value=selectedFrameAddress;
+    $("stackFrames").querySelectorAll("tr[data-frame-address]").forEach(row=>row.classList.toggle("asm-selected",row.dataset.frameAddress===selectedFrameAddress));
     loadMemory();
+    loadDisassembly(selectedFrameAddress);
   }));
+  if(selectedFrameAddress)loadDisassembly(selectedFrameAddress);
 }
 async function refreshStack(){
   if(!latestStatus||latestStatus.state!=="paused"||selectedTid===null)return;
@@ -381,6 +423,35 @@ async function refreshStack(){
   }catch(error){
     $("stackCount").textContent="STACK UNAVAILABLE";
     $("stackHeadline").textContent=error.message;
+  }
+}
+async function loadDisassembly(address=null){
+  const value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
+  if(!value)return;
+  $("asmAddress").value=value;
+  $("asmState").textContent="DECODING";
+  try{
+    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&count=64");
+    const rows=data.instructions||[];
+    $("asmInfo").textContent=data.address+" · runtime "+data.runtime_address+" · "+data.instruction_count+" instructions / "+data.bytes_read+" bytes";
+    $("asmInfo").className="hint";
+    $("asmState").textContent="X64 / INTEL";
+    $("disassembly").innerHTML=rows.map((instruction,index)=>
+      '<tr class="'+(index===0?"asm-current":"")+'" data-asm-address="'+esc(instruction.address)+'">'+
+      '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
+      '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>'
+    ).join("")||'<tr><td colspan="3" class="empty">No instructions decoded.</td></tr>';
+    $("disassembly").querySelectorAll("[data-address]").forEach(button=>button.addEventListener("click",()=>{
+      $("asmAddress").value=button.dataset.address;
+      loadDisassembly(button.dataset.address);
+    }));
+    const current=$("disassembly").querySelector(".asm-current");
+    if(current)current.scrollIntoView({block:"nearest"});
+  }catch(error){
+    $("asmState").textContent="UNAVAILABLE";
+    $("asmInfo").textContent=error.message;
+    $("asmInfo").className="error";
+    $("disassembly").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';
   }
 }
 async function refreshStatus(){
@@ -490,6 +561,12 @@ $("moreRegions").addEventListener("click",()=>loadRegions(true));
 $("readMemory").addEventListener("click",loadMemory);
 $("memoryAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadMemory();});
 $("refreshStack").addEventListener("click",refreshStack);
+$("disasmGo").addEventListener("click",()=>loadDisassembly($("asmAddress").value.trim()));
+$("asmAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadDisassembly($("asmAddress").value.trim());});
+$("disasmStop").addEventListener("click",()=>{
+  const address=latestStatus?.hit_address;
+  if(address)loadDisassembly(address);
+});
 $("refreshIo").addEventListener("click",refreshIoEvents);
 $("applyIo").addEventListener("click",async()=>{
   try{
