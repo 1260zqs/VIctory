@@ -344,13 +344,9 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             breakpoints.get(&address).copied()
         };
         let Some(original) = original else {
+            // Unowned INT3s are still useful debugger stops, including traps
+            // raised inside VCRUNTIME/CRT rather than the title image itself.
             let exception_address = record.ExceptionAddress as usize;
-            let in_title = exception_address
-                .checked_sub(runtime.target.image_base)
-                .is_some_and(|offset| offset < runtime.target.image_size);
-            if !in_title {
-                return 0;
-            }
             return handle_title_breakpoint(runtime, context, exception_address);
         };
 
@@ -619,10 +615,12 @@ fn suspend_peers(runtime: &Runtime, extra_excluded: &[u32]) {
         // SAFETY: a plain query of the calling thread ID.
         let current = unsafe { GetCurrentThreadId() };
         let server = runtime.server_thread.load(Ordering::Acquire);
+        let http_threads = runtime.http_threads.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let ids = process_thread_ids();
         let mut added = false;
         for id in ids {
-            if id == current || id == server || extra_excluded.contains(&id) || !known.insert(id) {
+            if id == current || id == server || http_threads.contains(&id)
+                || extra_excluded.contains(&id) || !known.insert(id) {
                 continue;
             }
             // SAFETY: opens another thread in this process for suspension.
@@ -759,9 +757,10 @@ fn thread_name(thread_id: u32) -> String {
 
 fn threads_json(runtime: &Runtime) -> Value {
     let server = runtime.server_thread.load(Ordering::Acquire);
+    let http_threads = runtime.http_threads.lock().unwrap_or_else(|e| e.into_inner()).clone();
     let threads: Vec<Value> = process_thread_ids()
         .into_iter()
-        .filter(|id| *id != server)
+        .filter(|id| *id != server && !http_threads.contains(id))
         .map(|id| {
             json!({
                 "id": id,
@@ -1671,6 +1670,20 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
         }
         ("GET", "/api/status") => (200, status_json(runtime)),
         ("GET", "/api/threads") => (200, threads_json(runtime)),
+        ("GET", "/api/io/breakpoints") => (200, io_breakpoints_json(runtime)),
+        ("GET", "/api/io/events") => (200, io_events_json(runtime)),
+        ("POST", "/api/io/breakpoints") => {
+            let reads = parse_bool_parameter(query, "read");
+            let writes = parse_bool_parameter(query, "write");
+            if (query_value(query, "read").is_some() && reads.is_none())
+                || (query_value(query, "write").is_some() && writes.is_none())
+            {
+                respond(&mut stream, 400, "application/json", r#"{"error":"read/write must be true or false"}"#);
+                return;
+            }
+            let path_filter = query_value(query, "path");
+            (200, configure_io_breakpoints(runtime, reads, writes, path_filter))
+        }
         ("GET", "/api/wait") => {
             let timeout_ms = match query_value(query, "timeout_ms") {
                 Some(value) => match value.parse::<u64>() {
