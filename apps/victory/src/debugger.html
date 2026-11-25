@@ -490,7 +490,7 @@ async function refreshIoEvents(){
     $("ioEvents").innerHTML=events.slice().reverse().map(event=>
       '<tr class="io-event-row"><td class="'+(event.operation==="read"?"op-read":"op-write")+'">'+esc(event.operation.toUpperCase())+'</td><td><div>'+esc(event.path)+'</div><div class="hint">'+esc(event.api)+'</div></td><td>'+(event.offset?esc(event.offset):"—")+'</td><td>'+Number(event.size).toLocaleString()+'</td></tr>'
     ).join("")||'<tr><td colspan="4" class="empty">No file events yet.</td></tr>';
-  }catch(error){$("ioEvents").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';}
+  }catch(error){$("ioEvents").innerHTML='<tr><td colspan="4" class="empty">'+esc(error.message)+'</td></tr>';}
 }
 async function refreshAll(){
   await refreshStatus();
