@@ -676,9 +676,9 @@ name = "victory"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "iced-x86",
  "blake3",
  "clap",
+ "iced-x86",
  "memchr",
  "serde_json",
  "tracing",
