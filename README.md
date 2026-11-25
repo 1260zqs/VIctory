@@ -189,8 +189,10 @@ The loopback HTTP API also exposes:
   include IDA/native addresses and a module-relative location.
 - `GET /api/wait?timeout_ms=30000` — wait for the next paused stop instead of
   polling status.
-- `POST /api/runto?address=0x...` — install a one-shot breakpoint and resume
-  until that address (requires the process to be paused).
+- `POST /api/runto?address=0x...` — arm a temporary breakpoint and resume
+  until that address (requires the process to be paused). The request returns
+  immediately; pair it with `GET /api/wait`. If the address already has a
+  persistent breakpoint, that breakpoint is left persistent.
 - `POST /api/memory/write?address=0x...&hex=...` — write up to 4 KiB of
   hexadecimal bytes while paused. Writes stay within one committed memory
   region and cannot overlap an active software breakpoint.
@@ -239,9 +241,9 @@ to read or write this file?" They do not catch arbitrary I/O performed by
 unhooked host-library code or direct native syscalls that bypass these HLE
 entry points.
 
-A title-generated `INT3` / `__debugbreak()` is reported as
-`reason:"exception"` in `/api/status`. Resume skips the one-byte INT3
-instruction; it does not repair the assertion or guarantee the title can
+An unowned process `INT3` (including title or CRT `__debugbreak()`) is
+reported as `reason:"exception"` in `/api/status`. Resume skips the one-byte
+INT3 instruction; it does not repair the assertion or guarantee the title can
 continue. Step skips that INT3 and stops after the next native instruction.
 First-chance access violations (`0xC0000005`) and illegal-instruction
 exceptions can also be inspected with their call stack and access details.
