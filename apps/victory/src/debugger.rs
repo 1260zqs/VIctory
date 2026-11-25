@@ -4,7 +4,7 @@
 //! process as the title so register and memory inspection does not depend on
 //! an external debugger attaching to the synthetic PE module.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ffi::c_void;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -22,7 +22,8 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Diagnostics::Debug::{
     AddVectoredExceptionHandler, CONTEXT, CONTEXT_FULL_AMD64, EXCEPTION_POINTERS,
-    FlushInstructionCache, GetThreadContext, ReadProcessMemory, WriteProcessMemory,
+    FlushInstructionCache, GetThreadContext, ReadProcessMemory, RtlCaptureContext,
+    WriteProcessMemory,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
@@ -107,11 +108,21 @@ struct Runtime {
     target: DebugTarget,
     started: Instant,
     server_thread: AtomicU32,
+    http_threads: Mutex<HashSet<u32>>,
     breakpoints: Mutex<BTreeMap<usize, u8>>,
     temporary_breakpoints: Mutex<HashSet<usize>>,
+    io_breakpoints: Mutex<IoBreakpointConfig>,
+    io_events: Mutex<VecDeque<victory_hle::modules::files::FileIoEvent>>,
     control: Mutex<Control>,
     changed: Condvar,
     suspended: Mutex<Vec<usize>>,
+}
+
+#[derive(Clone, Default)]
+struct IoBreakpointConfig {
+    reads: bool,
+    writes: bool,
+    path_filter: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -130,6 +141,7 @@ struct Control {
     hit_context: Option<CONTEXT>,
     pending_context: Option<CONTEXT>,
     exception_code: Option<u32>,
+    io_event: Option<victory_hle::modules::files::FileIoEvent>,
     action: Action,
     step_thread: Option<u32>,
     step_breakpoint: Option<usize>,
@@ -176,8 +188,11 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
         target,
         started: Instant::now(),
         server_thread: AtomicU32::new(0),
+        http_threads: Mutex::new(HashSet::new()),
         breakpoints: Mutex::new(BTreeMap::new()),
         temporary_breakpoints: Mutex::new(HashSet::new()),
+        io_breakpoints: Mutex::new(IoBreakpointConfig::default()),
+        io_events: Mutex::new(VecDeque::with_capacity(100)),
         control: Mutex::new(Control {
             paused: false,
             reason: "running",
@@ -187,6 +202,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
             hit_context: None,
             pending_context: None,
             exception_code: None,
+            io_event: None,
             action: Action::Wait,
             step_thread: None,
             step_breakpoint: None,
