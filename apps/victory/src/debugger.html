@@ -271,7 +271,9 @@ function renderStatus(s){
   $("reasonTag").className=paused?"tag pink":"tag cyan";
   $("pauseBtn").disabled=paused;
   $("continueBtn").disabled=!paused;
-  $("stepBtn").disabled=!paused||s.reason==="manual"||s.reason==="io-breakpoint";
+  const exceptionCode=String(s.exception?.code||"").toLowerCase();
+  const canStepException=s.reason!=="exception"||exceptionCode==="0x80000003";
+  $("stepBtn").disabled=!paused||s.reason==="manual"||s.reason==="io-breakpoint"||!canStepException;
   $("pid").textContent=s.pid;
   $("idaBase").textContent=s.ida_base;
   $("runtimeBase").textContent=s.runtime_base;
@@ -285,9 +287,12 @@ function renderStatus(s){
   $("heroBuild").textContent="BUILD / "+String(s.build_hash||"—").slice(0,16).toUpperCase();
   $("uptime").textContent=s.uptime_seconds+"s";
   if(s.reason==="io-breakpoint"&&s.io_event){
-    $("stopReason").textContent="I/O "+s.io_event.operation.toUpperCase()+" · "+s.io_event.path;
-  }
-  if(paused&&s.reason!=="io-breakpoint"){
+    $("stopReason").textContent="I/O "+s.io_event.operation.toUpperCase()+" · "+s.io_event.path+" · "+s.io_event.api;
+  }else if(paused&&s.reason==="exception"){
+    const code=s.exception?.code||"unknown exception";
+    const detail=s.exception?.detail?" · "+s.exception.detail:"";
+    $("stopReason").textContent=code+" · "+(s.hit_address||"—")+" · TID "+(s.hit_thread||"—")+detail;
+  }else if(paused){
     $("stopReason").textContent=s.reason+" · "+(s.hit_address||"—")+" · TID "+(s.hit_thread||"—");
   }
   if(!paused)$("stopReason").textContent="RUNNING";
