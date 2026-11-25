@@ -194,6 +194,9 @@ The loopback HTTP API also exposes:
 - `POST /api/memory/write?address=0x...&hex=...` — write up to 4 KiB of
   hexadecimal bytes while paused. Writes stay within one committed memory
   region and cannot overlap an active software breakpoint.
+- `POST /api/registers/set?thread=ID&name=RAX&value=0x...` — edit a
+  general-purpose register on the thread at the active exception stop. Title
+  addresses in register values use IDA space; edits apply when the thread resumes.
 - A title-generated `INT3` / `__debugbreak()` is reported as
   `reason:"exception"` in `/api/status`; Resume skips the INT3, while Step
   skips it and stops after the next native instruction.
