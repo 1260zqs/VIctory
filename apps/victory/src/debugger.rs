@@ -221,6 +221,13 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
     let handler = unsafe { AddVectoredExceptionHandler(1, Some(exception_handler)) };
     anyhow::ensure!(!handler.is_null(), "AddVectoredExceptionHandler failed");
 
+    let io_runtime = Arc::downgrade(&runtime);
+    victory_hle::modules::files::set_file_io_observer(Some(Arc::new(move |event| {
+        if let Some(runtime) = io_runtime.upgrade() {
+            handle_file_io(&runtime, event);
+        }
+    })));
+
     let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     let server_runtime = runtime.clone();
     thread::Builder::new()
@@ -234,7 +241,27 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
             tracing::info!(%address, "runtime debugger listening");
             for connection in listener.incoming() {
                 match connection {
-                    Ok(stream) => serve(stream, &server_runtime, address.port()),
+                    Ok(stream) => {
+                        let connection_runtime = server_runtime.clone();
+                        let port = address.port();
+                        if let Err(error) = thread::Builder::new()
+                            .name("victory-debug-http-client".into())
+                            .spawn(move || {
+                                let id = unsafe { GetCurrentThreadId() };
+                                connection_runtime.http_threads
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .insert(id);
+                                serve(stream, &connection_runtime, port);
+                                connection_runtime.http_threads
+                                    .lock()
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .remove(&id);
+                            })
+                        {
+                            tracing::warn!(%error, "debugger HTTP client thread failed");
+                        }
+                    }
                     Err(error) => tracing::warn!(%error, "debugger HTTP accept failed"),
                 }
             }
