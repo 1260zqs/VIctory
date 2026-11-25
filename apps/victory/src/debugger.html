@@ -291,7 +291,7 @@ tbody tr{cursor:pointer}
 const $=id=>document.getElementById(id);
 let latestStatus=null,selectedTid=null,latestThreads=[],selectedRegisters=null;
 let regionCursor="0x0",lastStopKey="",lastStack=[],selectedFrameAddress=null;
-let waitLoopRunning=false,disasmLoading=false,disasmHasMore=true,disasmRequestId=0;
+let waitLoopRunning=false,disasmLoading=false,disasmHasMore=true,disasmHasPrevious=true,disasmRequestId=0;
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path,method="GET"){
   const response=await fetch(path,{method,cache:"no-store"});
@@ -438,16 +438,19 @@ async function refreshStack(){
     $("stackHeadline").textContent=error.message;
   }
 }
-async function loadDisassembly(address=null,append=false){
-  if(append&&(disasmLoading||!disasmHasMore))return;
+async function loadDisassembly(address=null,append=false,direction="after"){
+  if(append&&(disasmLoading||(direction==="before"?!disasmHasPrevious:!disasmHasMore)))return;
   const scroll=$("disasmScroll");
   let value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
+  let anchorRow=null;
+  const oldScrollHeight=scroll.scrollHeight;
   if(append){
-    const previous=[...$("disassembly").querySelectorAll("tr[data-asm-address]")].at(-1);
-    if(!previous)return;
-    const last=JSON.parse(previous.dataset.instruction||"null");
-    if(!last)return;
-    value="0x"+(BigInt(last.address)+BigInt(last.length)).toString(16);
+    const rows=[...$("disassembly").querySelectorAll("tr[data-asm-address]")];
+    anchorRow=direction==="before"?rows[0]:rows.at(-1);
+    if(!anchorRow)return;
+    const instruction=JSON.parse(anchorRow.dataset.instruction||"null");
+    if(!instruction)return;
+    value=direction==="before"?instruction.address:"0x"+(BigInt(instruction.address)+BigInt(instruction.length)).toString(16);
   }
   if(!value)return;
   if(!append){
@@ -458,6 +461,7 @@ async function loadDisassembly(address=null,append=false){
   disasmLoading=true;
   if(!append){
     disasmHasMore=true;
+    disasmHasPrevious=true;
     $("asmAddress").value=value;
     $("asmState").textContent="DECODING";
     $("disassembly").innerHTML='<tr class="asm-anchor-spacer" aria-hidden="true"><td colspan="3"></td></tr>';
@@ -466,7 +470,8 @@ async function loadDisassembly(address=null,append=false){
     $("asmState").textContent="LOADING";
   }
   try{
-    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&count=128");
+    const endpoint=append&&direction==="before"?"/api/disassemble/before":"/api/disassemble";
+    const data=await api(endpoint+"?address="+encodeURIComponent(value)+"&count=128");
     if(requestId!==disasmRequestId)return;
     const rows=data.instructions||[];
     $("asmInfo").textContent=data.address+" · runtime "+data.runtime_address+" · "+data.instruction_count+" instructions / "+data.bytes_read+" bytes";
@@ -482,7 +487,14 @@ async function loadDisassembly(address=null,append=false){
         '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
         '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>';
     }).join("");
-    $("disassembly").insertAdjacentHTML("beforeend",html);
+    if(append&&direction==="before"){
+      anchorRow.insertAdjacentHTML("beforebegin",html);
+      disasmHasPrevious=rows.length===128;
+      scroll.scrollTop+=scroll.scrollHeight-oldScrollHeight;
+    }else{
+      $("disassembly").insertAdjacentHTML("beforeend",html);
+      if(append)disasmHasMore=rows.length===128;
+    }
     $("disassembly").querySelectorAll("button.disasm-address:not([data-bound])").forEach(button=>{
       button.dataset.bound="1";
       button.addEventListener("click",()=>{
@@ -490,14 +502,19 @@ async function loadDisassembly(address=null,append=false){
         loadDisassembly(button.dataset.address);
       });
     });
-    disasmHasMore=rows.length===128;
-    if(!append)scroll.scrollTop=0;
+    if(!append){
+      disasmHasMore=rows.length===128;
+      disasmHasPrevious=true;
+      scroll.scrollTop=0;
+    }
   }catch(error){
     if(requestId===disasmRequestId){
       disasmHasMore=false;
       if(append){
-        $("asmState").textContent="END OF REGION";
-        $("asmInfo").textContent="No more readable code after the loaded instructions · "+error.message;
+        if(direction==="before")disasmHasPrevious=false;
+        else disasmHasMore=false;
+        $("asmState").textContent=direction==="before"?"START OF REGION":"END OF REGION";
+        $("asmInfo").textContent=(direction==="before"?"No more readable code before the loaded instructions · ":"No more readable code after the loaded instructions · ")+error.message;
         $("asmInfo").className="hint";
       }else{
         $("asmState").textContent="UNAVAILABLE";
@@ -619,7 +636,8 @@ $("memoryAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loa
 $("refreshStack").addEventListener("click",refreshStack);
 $("disasmScroll").addEventListener("scroll",()=>{
   const element=$("disasmScroll");
-  if(element.scrollTop+element.clientHeight>=element.scrollHeight-180)loadDisassembly(null,true);
+  if(element.scrollTop<120)loadDisassembly(null,true,"before");
+  else if(element.scrollTop+element.clientHeight>=element.scrollHeight-180)loadDisassembly(null,true,"after");
 });
 $("disasmGo").addEventListener("click",()=>loadDisassembly($("asmAddress").value.trim()));
 $("asmAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadDisassembly($("asmAddress").value.trim());});
