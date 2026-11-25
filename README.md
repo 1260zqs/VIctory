@@ -169,12 +169,12 @@ The on/off switches below (`...=1`) are off when unset or set to `0`.
 To attach IDA (or WinDbg) before the Xbox entry point executes, run:
 
 ```powershell
-target\\release\\victory.exe run <game dir>\\<the title's exe> --execute --wait-for-debugger
+target\release\\victory.exe run <game dir>\\<the title's exe> --execute --wait-for-debugger
 ```
 
 VIctory maps the title and binds its imports, then writes
 `ida-debug-map.txt` beside the title's data/temp folder under
-`%LOCALAPPDATA%\\victory\\data\\<title-id>\\`. It waits until a native
+`%LOCALAPPDATA%\victory\data\<title-id>\`. It waits until a native
 debugger is attached to `victory.exe`, then raises a breakpoint before
 starting the title's original entry point. In IDA, attach its local Windows
 debugger to `victory.exe`, continue the initial attach breakpoint, and the
@@ -188,6 +188,10 @@ entry point. For an IDA address, calculate the live address as
 opened in IDA before trusting the mapping. The runtime image is a prepared
 copy named `victory-image-<hash>.dll`; the original executable remains the
 static-analysis input.
+
+This first pass provides the native attach point and address map; it does not
+yet rebase the IDA database or install IDA breakpoints automatically. Those
+steps belong in the IDA-side bridge.
 
 | Variable | Effect |
 |----------|--------|
