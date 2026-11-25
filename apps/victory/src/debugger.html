@@ -3,103 +3,254 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>VIctory Runtime Debugger</title>
+<meta name="color-scheme" content="dark">
+<title>VIctory // Runtime Control</title>
 <style>
-:root{color-scheme:dark;--bg:#0b0e13;--panel:#121821;--panel2:#0e141c;--line:#263241;--muted:#8794a5;--text:#e5edf7;--accent:#78a9ff;--green:#58d69b;--red:#ff7474;--amber:#e8bc68}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Inter,Segoe UI,Arial,sans-serif}
-button,input,select{font:inherit;color:inherit}button{border:1px solid var(--line);background:#1a2431;border-radius:6px;padding:7px 12px;cursor:pointer}button:hover{border-color:#5479aa;background:#202e40}button:disabled{opacity:.38;cursor:not-allowed}
-input{background:#0c1219;border:1px solid var(--line);border-radius:6px;padding:8px 10px;outline:none}input:focus{border-color:var(--accent)}
-.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#10161e;position:sticky;top:0;z-index:5}
-.brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.08em}.mark{width:25px;height:25px;border-radius:7px;background:linear-gradient(135deg,#7eb3ff,#5366c8);display:grid;place-items:center;color:#08111d;font-weight:900}
-.subbrand{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0}
-.actions{display:flex;gap:8px;align-items:center}.state{display:flex;align-items:center;gap:8px;margin-right:12px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #58d69b55}.dot.paused{background:var(--amber);box-shadow:0 0 12px #e8bc6855}
-.primary{background:#26466f;border-color:#416b9e}.danger{border-color:#683d42;background:#321d22;color:#ffb6b6}
-main{max-width:1680px;margin:0 auto;padding:18px 22px 32px}.summary{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
-.metric,.panel{background:var(--panel);border:1px solid var(--line);border-radius:9px}.metric{padding:12px 14px;min-width:0}.metric .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}.metric .v{font:600 14px/1.4 Consolas,monospace;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.layout{display:grid;grid-template-columns:minmax(300px, .9fr) minmax(440px,1.25fr) minmax(360px,1fr);gap:12px;align-items:start}
-.col{display:flex;flex-direction:column;gap:12px;min-width:0}.panel{overflow:hidden}.panel-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}.hint{color:var(--muted);font-size:11px}.panel-body{padding:12px 14px}.toolbar{display:flex;gap:7px;align-items:center}.toolbar input{min-width:0;flex:1}
-table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{text-align:left;color:var(--muted);font:600 10px/1.4 Inter,Segoe UI,Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em;background:var(--panel2);position:sticky;top:0}td,th{padding:8px 9px;border-bottom:1px solid #222d39;white-space:nowrap}tbody tr:hover{background:#1b2938}tbody tr.selected{background:#1b3049}tbody tr{cursor:pointer}
-.scroll{max-height:270px;overflow:auto}.thread-name{font:12px Inter,Segoe UI,Arial,sans-serif;max-width:190px;overflow:hidden;text-overflow:ellipsis}
-.regs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.reg{display:flex;justify-content:space-between;gap:10px;background:#0d141c;border:1px solid #202c39;border-radius:5px;padding:6px 8px}.reg b{color:#93a5ba;font-weight:600}.reg code{font:12px Consolas,monospace;color:#d8e6f7}
-.memory{font:12px/1.6 Consolas,monospace;white-space:pre;overflow:auto;background:#090e14;border:1px solid #202a36;border-radius:6px;padding:10px;min-height:130px;color:#c9d8e8}.mem-row{display:flex;gap:16px}.mem-addr{color:#7898bd}.mem-hex{color:#d6e5f6}.mem-ascii{color:#8fa38e}
-.tag{border:1px solid #34465b;border-radius:4px;padding:2px 5px;color:#a8c4e7;font-size:10px}.empty{padding:18px;text-align:center;color:var(--muted)}.error{color:#ff9292;padding:8px 0}.foot{color:var(--muted);font-size:11px;margin-top:12px}
-@media(max-width:1200px){.layout{grid-template-columns:1fr 1fr}.layout>.col:last-child{grid-column:1/-1}.summary{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:760px){main{padding:12px}.top{padding:0 12px}.layout{grid-template-columns:1fr}.layout>.col:last-child{grid-column:auto}.summary{grid-template-columns:repeat(2,1fr)}.subbrand{display:none}.actions{gap:5px}.actions button{padding:6px 8px}}
+:root{
+  color-scheme:dark;
+  --bg:#080910;--bg2:#0d101b;--panel:rgba(16,19,32,.92);--panel2:#111626;
+  --line:#242a40;--line2:#333b58;--text:#edf2ff;--muted:#8a91aa;
+  --cyan:#53efff;--cyan2:#16b9d0;--pink:#ff4d9b;--pink2:#c12b78;
+  --violet:#9d82ff;--lime:#a6ffcb;--amber:#ffc66d;--red:#ff6b7f;
+  --mono:"Cascadia Code","SFMono-Regular",Consolas,monospace;
+  --sans:Inter,"Segoe UI",Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html{min-height:100%;background:var(--bg)}
+body{margin:0;min-height:100vh;background:
+  radial-gradient(ellipse at 12% -10%,rgba(255,56,142,.16),transparent 42%),
+  radial-gradient(ellipse at 85% 4%,rgba(38,221,255,.13),transparent 36%),
+  linear-gradient(180deg,#090a13 0%,#080a12 54%,#0b0d17 100%);
+  color:var(--text);font:13px/1.45 var(--sans);overflow-x:hidden}
+body:before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.22;
+  background-image:linear-gradient(rgba(109,129,175,.11) 1px,transparent 1px),linear-gradient(90deg,rgba(109,129,175,.11) 1px,transparent 1px);
+  background-size:42px 42px;mask-image:linear-gradient(to bottom,black,transparent 88%)}
+body:after{content:"";position:fixed;left:0;right:0;top:0;height:2px;z-index:20;pointer-events:none;
+  background:linear-gradient(90deg,transparent,var(--pink),var(--cyan),transparent);opacity:.85;box-shadow:0 0 18px rgba(83,239,255,.4)}
+button,input,select{font:inherit;color:inherit}
+button{border:1px solid var(--line2);background:#171b2c;border-radius:7px;padding:8px 12px;cursor:pointer;transition:.16s ease}
+button:hover{border-color:var(--cyan);box-shadow:0 0 14px rgba(83,239,255,.12);transform:translateY(-1px)}
+button:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
+input,select{min-width:0;background:#0b0e19;border:1px solid #2a3048;border-radius:7px;padding:9px 10px;outline:none}
+input:focus,select:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(83,239,255,.1)}
+input::placeholder{color:#666d86}
+code,.mono{font-family:var(--mono)}
+.topbar{height:68px;position:sticky;top:0;z-index:10;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 26px;
+  background:rgba(8,10,19,.88);backdrop-filter:blur(18px);border-bottom:1px solid #292e46}
+.brand{display:flex;align-items:center;gap:14px;min-width:220px}
+.logo{width:34px;height:34px;position:relative;display:grid;place-items:center;border:1px solid rgba(83,239,255,.6);border-radius:10px;
+  background:linear-gradient(140deg,rgba(255,77,155,.22),rgba(83,239,255,.16));box-shadow:0 0 22px rgba(83,239,255,.13),inset 0 0 15px rgba(255,77,155,.08)}
+.logo:before{content:"V";font:900 19px/1 var(--sans);color:#fff;text-shadow:0 0 10px var(--pink),0 0 16px var(--cyan)}
+.brand-name{font-weight:900;letter-spacing:.24em;font-size:13px}
+.brand-sub{display:block;margin-top:3px;font-size:9px;letter-spacing:.22em;color:var(--muted);font-weight:700}
+.top-right{display:flex;align-items:center;gap:14px}
+.state{display:flex;align-items:center;gap:9px;color:#c9d0e5;text-transform:uppercase;font-size:10px;letter-spacing:.13em;font-weight:800}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--lime);box-shadow:0 0 13px rgba(166,255,203,.8)}
+.dot.paused{background:var(--pink);box-shadow:0 0 14px rgba(255,77,155,.9);animation:pulse 1.3s infinite}
+@keyframes pulse{50%{opacity:.42;box-shadow:0 0 3px rgba(255,77,155,.3)}}
+.button-row{display:flex;gap:7px}
+.btn-cyan{color:#07131a;background:linear-gradient(110deg,#69f5ff,#37cfe6);border:0;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.btn-pink{color:white;background:linear-gradient(110deg,#e93b8b,#a92c82);border:0;font-weight:900;text-transform:uppercase;letter-spacing:.08em}
+.btn-quiet{background:#151929}
+main{position:relative;z-index:1;max-width:1900px;margin:0 auto;padding:22px 26px 36px}
+.hero{display:flex;justify-content:space-between;align-items:flex-end;gap:24px;margin:4px 0 18px}
+.eyebrow{font-size:9px;color:var(--cyan);letter-spacing:.24em;text-transform:uppercase;font-weight:900}
+h1{font-size:clamp(20px,2vw,29px);line-height:1.1;margin:7px 0 5px;letter-spacing:.01em}
+.hero p{color:var(--muted);margin:0;font-size:12px}
+.build-chip{display:flex;flex-direction:column;align-items:flex-end;gap:5px;color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.12em}
+.build-chip strong{font:12px var(--mono);color:#e6eafa;letter-spacing:0}
+.metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.metric,.panel{position:relative;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(0,0,0,.16)}
+.metric{padding:12px 14px;overflow:hidden}
+.metric:after{content:"";position:absolute;left:0;top:0;height:2px;width:52px;background:linear-gradient(90deg,var(--pink),var(--cyan));box-shadow:0 0 12px rgba(83,239,255,.5)}
+.metric .k{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.14em;font-weight:800}
+.metric .v{font:600 13px/1.5 var(--mono);margin-top:7px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#eaf2ff}
+.layout{display:grid;grid-template-columns:minmax(250px, .82fr) minmax(480px,1.55fr) minmax(300px, .98fr);gap:12px;align-items:start}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}
+.panel{overflow:hidden}
+.panel-head{min-height:43px;padding:10px 13px;border-bottom:1px solid #282e45;display:flex;justify-content:space-between;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,77,155,.055),rgba(83,239,255,.025))}
+.panel-title{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}
+.panel-title:before{content:"";width:5px;height:14px;border-radius:4px;background:linear-gradient(var(--pink),var(--cyan));box-shadow:0 0 9px rgba(255,77,155,.35)}
+.hint{color:var(--muted);font-size:10px}
+.panel-body{padding:12px 13px}
+.tag{display:inline-flex;align-items:center;gap:5px;border:1px solid #3a4260;border-radius:4px;padding:3px 6px;color:#aeb9d5;font-size:9px;letter-spacing:.06em;text-transform:uppercase}
+.tag.cyan{border-color:rgba(83,239,255,.35);color:var(--cyan);background:rgba(83,239,255,.06)}
+.tag.pink{border-color:rgba(255,77,155,.4);color:#ff91bf;background:rgba(255,77,155,.07)}
+.tag.amber{border-color:rgba(255,198,109,.4);color:var(--amber)}
+table{width:100%;border-collapse:collapse;font:11px/1.4 var(--mono)}
+th{text-align:left;color:#7e87a2;font:800 9px/1.4 var(--sans);text-transform:uppercase;letter-spacing:.12em;background:#101424;position:sticky;top:0;z-index:1}
+td,th{padding:8px 9px;border-bottom:1px solid rgba(43,50,75,.72);white-space:nowrap}
+tbody tr:hover{background:rgba(83,239,255,.055)}
+tbody tr.selected{background:rgba(255,77,155,.1)}
+tbody tr{cursor:pointer}
+.scroll{max-height:270px;overflow:auto;scrollbar-color:#313a58 #0c0f1a;scrollbar-width:thin}
+.thread-name{font:11px var(--sans);max-width:170px;overflow:hidden;text-overflow:ellipsis;color:#d4d9e9}
+.empty{padding:18px;text-align:center;color:#747d99;font:11px var(--sans)}
+.regs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.reg{display:flex;justify-content:space-between;gap:8px;background:#0b0f1b;border:1px solid #202740;border-radius:5px;padding:6px 7px;min-width:0}
+.reg b{color:#8792ae;font-size:9px;letter-spacing:.08em}
+.reg code{font-size:10px;color:#dbe8ff;overflow:hidden;text-overflow:ellipsis}
+.stack-panel{border-color:#3b3154;box-shadow:0 10px 38px rgba(107,57,144,.10)}
+.stack-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 13px;background:linear-gradient(100deg,rgba(255,77,155,.11),rgba(83,239,255,.06));border-bottom:1px solid #2d3450}
+.stack-banner strong{font-size:11px;letter-spacing:.07em}
+.stack-table td:first-child{width:30px;color:#707a98}
+.stack-table td:nth-child(2){color:var(--cyan);width:130px}
+.stack-table td:nth-child(3){color:#e8ebf7}
+.stack-table tr.title-frame td:nth-child(3){color:#ff9bc2}
+.stack-table tr.current-frame{background:rgba(255,77,155,.1)}
+.stack-frame{border:0;background:transparent;padding:0;color:inherit;font:inherit;text-align:left}
+.stack-frame:hover{color:var(--cyan);text-decoration:underline;box-shadow:none;transform:none}
+.toolbar{display:flex;gap:7px;align-items:center}
+.toolbar input{min-width:0;flex:1}
+.memory{font:10px/1.65 var(--mono);white-space:pre;overflow:auto;background:#080c16;border:1px solid #252b42;border-radius:7px;padding:10px;min-height:135px;color:#c9d8eb}
+.mem-row{display:flex;gap:14px;min-width:max-content}
+.mem-addr{color:#7587ae}.mem-hex{color:#d9e7fd}.mem-ascii{color:#89ad9b}
+.io-config{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:9px}
+.check{display:flex;align-items:center;gap:8px;border:1px solid #29324d;background:#0c1120;border-radius:6px;padding:8px;font-size:10px;font-weight:800;letter-spacing:.06em;text-transform:uppercase}
+.check input{accent-color:var(--pink);width:14px;height:14px;margin:0}
+.io-path{display:flex;gap:7px;margin-top:8px}
+.io-path input{flex:1}
+.io-event-row .op-read{color:var(--cyan);font-weight:900}.io-event-row .op-write{color:#ff92bd;font-weight:900}
+.io-current{border:1px solid rgba(255,77,155,.34);background:rgba(255,77,155,.07);border-radius:7px;padding:10px;margin-bottom:10px}
+.io-current .path{font:11px/1.45 var(--mono);color:#fff;overflow-wrap:anywhere;margin:6px 0}
+.io-current .meta{font-size:10px;color:#a4acc3}
+.bp-row button{padding:4px 7px;font-size:9px}
+.danger{border-color:#713c59;color:#ff9dbf;background:#271524}
+.runtime-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.runtime-grid .k{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.12em}
+.runtime-grid .v{margin-top:3px;overflow-wrap:anywhere;font:10px var(--mono);color:#e5eaf8}
+.subsection{padding-top:10px;margin-top:10px;border-top:1px solid #282e45}
+.error{color:#ff8ea7}
+.foot{color:#6f7892;font-size:10px;margin-top:16px;display:flex;justify-content:space-between;gap:16px}
+@media(max-width:1450px){.layout{grid-template-columns:minmax(240px,.8fr) minmax(430px,1.4fr)}.layout>.col:last-child{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr}.layout>.col:last-child>.panel:last-child{grid-column:1/-1}.metrics{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:900px){main{padding:16px}.topbar{padding:0 16px}.layout{grid-template-columns:1fr}.layout>.col:last-child{grid-column:auto;display:flex}.metrics{grid-template-columns:repeat(2,1fr)}.hero{align-items:flex-start;flex-direction:column}.build-chip{align-items:flex-start}.top-right{gap:8px}.brand{min-width:0}}
+@media(max-width:600px){.topbar{height:auto;min-height:62px;align-items:flex-start;padding:12px;flex-direction:column}.top-right{width:100%;justify-content:space-between}.button-row{gap:4px}.button-row button{padding:7px 8px;font-size:10px}main{padding:12px}.metrics{gap:7px}.metric{padding:10px}.runtime-grid{grid-template-columns:1fr}.io-path{flex-direction:column}}
 </style>
 </head>
 <body>
-<header class="top">
-  <div class="brand"><div class="mark">V</div><div>VICTORY <span class="subbrand">/ RUNTIME DEBUGGER</span></div></div>
-  <div class="actions">
-    <div class="state"><span id="stateDot" class="dot"></span><span id="stateText">Connecting…</span></div>
-    <button id="pauseBtn">Pause</button><button id="continueBtn" class="primary" disabled>Continue</button><button id="stepBtn" disabled>Step</button>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo"></div>
+    <div><div class="brand-name">VICTORY</div><span class="brand-sub">RUNTIME CONTROL // SERIES X64</span></div>
+  </div>
+  <div class="top-right">
+    <div class="state"><span id="stateDot" class="dot"></span><span id="stateText">CONNECTING</span><span id="reasonTag" class="tag cyan">LIVE</span></div>
+    <div class="button-row">
+      <button id="pauseBtn" class="btn-quiet">Pause</button>
+      <button id="continueBtn" class="btn-pink" disabled>Resume</button>
+      <button id="stepBtn" class="btn-cyan" disabled>Step</button>
+    </div>
   </div>
 </header>
+
 <main>
-  <section class="summary">
-    <div class="metric"><div class="k">Process</div><div class="v" id="pid">—</div></div>
+  <section class="hero">
+    <div>
+      <div class="eyebrow">Native execution // debugger session</div>
+      <h1>Runtime Operations</h1>
+      <p>Thread state, execution flow, memory inspection and file-system telemetry.</p>
+    </div>
+    <div class="build-chip"><span>Active target</span><strong id="heroTitle">Awaiting process…</strong><span id="heroBuild">BUILD / —</span></div>
+  </section>
+
+  <section class="metrics">
+    <div class="metric"><div class="k">Process ID</div><div class="v" id="pid">—</div></div>
     <div class="metric"><div class="k">IDA image base</div><div class="v" id="idaBase">—</div></div>
     <div class="metric"><div class="k">Runtime image base</div><div class="v" id="runtimeBase">—</div></div>
     <div class="metric"><div class="k">Rebase delta</div><div class="v" id="rebaseDelta">—</div></div>
-    <div class="metric"><div class="k">Entry point (IDA VA)</div><div class="v" id="entry">—</div></div>
-    <div class="metric"><div class="k">Breakpoints</div><div class="v" id="bpCount">0</div></div>
+    <div class="metric"><div class="k">Entry point</div><div class="v" id="entry">—</div></div>
+    <div class="metric"><div class="k">Breakpoints / uptime</div><div class="v"><span id="bpCount">0</span> <span style="color:#707a98">/</span> <span id="uptime">—</span></div></div>
   </section>
 
   <section class="layout">
     <div class="col">
       <div class="panel">
-        <div class="panel-head"><span class="panel-title">Threads</span><span class="hint" id="threadCount">—</span></div>
-        <div class="scroll"><table><thead><tr><th style="width:58px">TID</th><th>Name</th><th>RIP</th></tr></thead><tbody id="threads"><tr><td colspan="3" class="empty">Waiting for runtime…</td></tr></tbody></table></div>
+        <div class="panel-head"><span class="panel-title">Execution threads</span><span class="tag cyan" id="threadCount">—</span></div>
+        <div class="scroll"><table><thead><tr><th>TID</th><th>Thread</th><th>RIP</th></tr></thead><tbody id="threads"><tr><td colspan="3" class="empty">Waiting for runtime…</td></tr></tbody></table></div>
       </div>
       <div class="panel">
-        <div class="panel-head"><span class="panel-title">Registers</span><span class="hint" id="selectedThread">No thread selected</span></div>
+        <div class="panel-head"><span class="panel-title">Register context</span><span class="hint" id="selectedThread">No thread selected</span></div>
         <div class="panel-body"><div id="registers" class="regs"><div class="empty">Select a thread to inspect its context.</div></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Target profile</span><span class="tag">SESSION</span></div>
+        <div class="panel-body">
+          <div class="runtime-grid">
+            <div><div class="k">Title</div><div class="v" id="title">—</div></div>
+            <div><div class="k">Image size</div><div class="v" id="imageSize">—</div></div>
+            <div style="grid-column:1/-1"><div class="k">Build BLAKE3</div><div class="v" id="hash">—</div></div>
+            <div style="grid-column:1/-1"><div class="k">HTTP endpoint</div><div class="v">127.0.0.1:17890 // loopback</div></div>
+          </div>
+        </div>
       </div>
     </div>
 
     <div class="col">
-      <div class="panel">
-        <div class="panel-head"><span class="panel-title">Virtual memory regions</span><button id="refreshRegions">Refresh</button></div>
-        <div class="scroll" style="max-height:470px"><table><thead><tr><th>Base (IDA/native)</th><th>Size</th><th>Type</th><th>State</th><th>Protection</th></tr></thead><tbody id="regions"><tr><td colspan="5" class="empty">Press Refresh to enumerate regions.</td></tr></tbody></table></div>
-        <div class="panel-body" style="border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><span class="hint" id="regionInfo">VirtualQuery snapshot</span><button id="moreRegions" disabled>Load next page</button></div>
+      <div class="panel stack-panel">
+        <div class="panel-head"><span class="panel-title">Call stack</span><span class="tag pink" id="stackCount">WAITING FOR STOP</span></div>
+        <div class="stack-banner">
+          <div><strong id="stackHeadline">No active stop</strong><div class="hint" id="stackSub">The stack is captured automatically on break.</div></div>
+          <button id="refreshStack" class="btn-quiet">Refresh stack</button>
+        </div>
+        <div class="scroll" style="max-height:360px"><table class="stack-table"><thead><tr><th>#</th><th>Address</th><th>Module / function</th></tr></thead><tbody id="stackFrames"><tr><td colspan="3" class="empty">Run until a breakpoint or I/O event is hit.</td></tr></tbody></table></div>
       </div>
+
       <div class="panel">
-        <div class="panel-head"><span class="panel-title">Memory viewer</span><span class="hint">ReadProcessMemory</span></div>
+        <div class="panel-head"><span class="panel-title">Memory inspector</span><span class="hint">READ / WRITE PROCESS MEMORY</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="memoryAddress" value="" placeholder="IDA or native VA, e.g. 0x140001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
-          <div id="memoryInfo" class="hint" style="margin:9px 0">Enter an address or click a memory region.</div>
+          <div class="toolbar"><input id="memoryAddress" placeholder="IDA or native VA · 0x140001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="btn-cyan">Read</button></div>
+          <div class="hint" id="memoryInfo" style="margin:8px 0">Enter an address or select a region.</div>
           <div id="memoryView" class="memory">No memory loaded.</div>
         </div>
       </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Virtual memory map</span><button id="refreshRegions">Refresh map</button></div>
+        <div class="scroll" style="max-height:245px"><table><thead><tr><th>Base</th><th>Size</th><th>Type</th><th>Protect</th></tr></thead><tbody id="regions"><tr><td colspan="4" class="empty">Press Refresh to enumerate regions.</td></tr></tbody></table></div>
+        <div class="panel-body" style="border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><span class="hint" id="regionInfo">VirtualQuery snapshot</span><button id="moreRegions" disabled>Next page</button></div>
+      </div>
     </div>
 
     <div class="col">
       <div class="panel">
-        <div class="panel-head"><span class="panel-title">Software breakpoints</span><span class="tag">INT3</span></div>
+        <div class="panel-head"><span class="panel-title">File I/O breakpoints</span><span class="tag pink">HLE / API</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="breakpointAddress" placeholder="IDA EA, e.g. 0x140123456"><button id="addBreakpoint" class="primary">Add</button></div>
-          <div class="hint" style="margin-top:8px">Paste IDA EAs directly for the title image. Addresses outside the title image (host DLLs, stacks, etc.) use their native process VA.</div>
+          <div class="hint" style="margin-bottom:9px">Pause at the title thread that initiates a file operation. The call stack includes the originating game function.</div>
+          <div class="io-config">
+            <label class="check"><input id="ioRead" type="checkbox"> Break on read</label>
+            <label class="check"><input id="ioWrite" type="checkbox"> Break on write</label>
+          </div>
+          <div class="io-path"><input id="ioPath" placeholder="Optional path contains… e.g. common.rpf"><button id="applyIo" class="btn-pink">Arm I/O</button></div>
+          <div class="hint" id="ioConfigInfo" style="margin-top:8px">I/O breakpoints disabled.</div>
+          <div id="ioStop" class="io-current" style="display:none;margin-top:12px">
+            <span class="tag pink" id="ioStopType">READ</span>
+            <div class="path" id="ioStopPath">—</div>
+            <div class="meta" id="ioStopMeta">—</div>
+          </div>
+        </div>
+        <div class="panel-head"><span class="panel-title">Recent file activity</span><button id="refreshIo">Refresh</button></div>
+        <div class="scroll" style="max-height:270px"><table><thead><tr><th>Op</th><th>Path / API</th><th>Bytes</th></tr></thead><tbody id="ioEvents"><tr><td colspan="3" class="empty">No file events yet.</td></tr></tbody></table></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Software breakpoints</span><span class="tag cyan">INT3</span></div>
+        <div class="panel-body">
+          <div class="toolbar"><input id="breakpointAddress" placeholder="IDA EA · 0x140123456"><button id="addBreakpoint" class="btn-cyan">Add</button></div>
+          <div class="hint" style="margin-top:8px">Title image accepts IDA EAs. Other mappings use native VAs.</div>
         </div>
         <div class="scroll"><table><thead><tr><th>Address</th><th>Original</th><th></th></tr></thead><tbody id="breakpoints"><tr><td colspan="3" class="empty">No breakpoints set.</td></tr></tbody></table></div>
       </div>
-      <div class="panel">
-        <div class="panel-head"><span class="panel-title">Runtime information</span><span class="hint" id="uptime">—</span></div>
-        <div class="panel-body">
-          <div class="hint">Title</div><div id="title" style="margin-bottom:10px">—</div>
-          <div class="hint">Build BLAKE3</div><div id="hash" style="font:11px Consolas,monospace;overflow-wrap:anywhere;margin:4px 0 12px">—</div>
-          <div class="hint">Image size</div><div id="imageSize" style="font:12px Consolas,monospace;margin-top:4px">—</div>
-          <div class="hint" style="margin-top:12px">Stop reason</div><div id="stopReason" style="margin-top:4px">—</div>
-          <div class="hint" style="margin-top:12px">Debugger endpoint</div><div style="font:12px Consolas,monospace;margin-top:4px">127.0.0.1 (loopback only)</div>
-        </div>
-      </div>
     </div>
   </section>
-  <div class="foot">VIctory inspects its own native x64 process. Title-image addresses are displayed in the IDA address space; the runtime image base and rebase delta are shown above. Other process mappings retain their native addresses.</div>
+
+  <div class="foot"><span>VICTORY // NATIVE X64 RUNTIME INSPECTOR</span><span>Title addresses are rebased to IDA space · Host mappings retain native VAs</span></div>
 </main>
+
 <script>
 const $=id=>document.getElementById(id);
-let latestStatus=null, selectedTid=null, latestThreads=[], selectedRegisters=null;
-let regionCursor="0x0";
+let latestStatus=null,selectedTid=null,latestThreads=[],selectedRegisters=null;
+let regionCursor="0x0",lastStopKey="",lastStack=[];
+let waitLoopRunning=false;
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path,method="GET"){
   const response=await fetch(path,{method,cache:"no-store"});
@@ -107,15 +258,20 @@ async function api(path,method="GET"){
   if(!response.ok)throw new Error(data.error||response.statusText);
   return data;
 }
-function showError(error){$("memoryInfo").textContent=error.message||String(error);$("memoryInfo").className="error";}
+function showError(message,target="memoryInfo"){
+  $(target).textContent=message.message||String(message);
+  $(target).className="error";
+}
 function renderStatus(s){
   latestStatus=s;
   const paused=s.state==="paused";
   $("stateDot").className=paused?"dot paused":"dot";
-  $("stateText").textContent=paused?"Paused":"Running";
+  $("stateText").textContent=paused?"PROCESS PAUSED":"PROCESS RUNNING";
+  $("reasonTag").textContent=paused?(s.reason||"STOP").replaceAll("-"," ").toUpperCase():"LIVE";
+  $("reasonTag").className=paused?"tag pink":"tag cyan";
   $("pauseBtn").disabled=paused;
   $("continueBtn").disabled=!paused;
-  $("stepBtn").disabled=!paused||s.reason==="manual";
+  $("stepBtn").disabled=!paused||s.reason==="manual"||s.reason==="io-breakpoint";
   $("pid").textContent=s.pid;
   $("idaBase").textContent=s.ida_base;
   $("runtimeBase").textContent=s.runtime_base;
@@ -124,26 +280,54 @@ function renderStatus(s){
   $("entry").textContent=s.entry_address;
   $("bpCount").textContent=s.breakpoint_count;
   $("title").textContent=s.title;
+  $("heroTitle").textContent=s.title;
   $("hash").textContent=s.build_hash;
+  $("heroBuild").textContent="BUILD / "+String(s.build_hash||"—").slice(0,16).toUpperCase();
+  $("uptime").textContent=s.uptime_seconds+"s";
+  if(s.reason==="io-breakpoint"&&s.io_event){
+    $("stopReason").textContent="I/O "+s.io_event.operation.toUpperCase()+" · "+s.io_event.path;
+  }
+  if(paused&&s.reason!=="io-breakpoint"){
+    $("stopReason").textContent=s.reason+" · "+(s.hit_address||"—")+" · TID "+(s.hit_thread||"—");
+  }
+  if(!paused)$("stopReason").textContent="RUNNING";
+  if(s.io_event){
+    $("ioStop").style.display="block";
+    $("ioStopType").textContent=(s.io_event.operation||"I/O").toUpperCase();
+    $("ioStopPath").textContent=s.io_event.path;
+    $("ioStopMeta").textContent=s.io_event.api+" · "+s.io_event.size+" bytes"+(s.io_event.offset?" · offset "+s.io_event.offset:"");
+  }else if(s.reason!=="io-breakpoint"){
+    $("ioStop").style.display="none";
+  }
 
-  $("uptime").textContent=s.uptime_seconds+" sec";
-  $("stopReason").textContent=s.hit_address?s.reason+" at "+s.hit_address+" (TID "+s.hit_thread+")":s.reason;
+  if(paused){
+    const event=s.io_event||{};
+    const stopKey=[s.reason,s.hit_address,s.hit_thread,event.operation,event.path,event.api].join("|");
+    if(stopKey!==lastStopKey){
+      lastStopKey=stopKey;
+      if(s.hit_thread!==null&&s.hit_thread!==undefined)selectedTid=s.hit_thread;
+      refreshThreads();
+      refreshRegisters();
+      refreshStack();
+    }
+  }else{
+    lastStopKey="";
+  }
 }
 const registerOrder=["rax","rbx","rcx","rdx","rsi","rdi","rbp","rsp","rip","r8","r9","r10","r11","r12","r13","r14","r15","rflags"];
 function renderRegisters(regs){
-  if(!regs){$("registers").innerHTML='<div class="empty">Context unavailable for this thread.</div>';return;}
+  if(!regs){$("registers").innerHTML='<div class="empty">Context unavailable.</div>';return;}
   $("registers").innerHTML=registerOrder.map(name=>'<div class="reg"><b>'+name.toUpperCase()+'</b><code>'+esc(regs[name])+'</code></div>').join("");
 }
 function renderThreads(threads){
   latestThreads=threads;
-  $("threadCount").textContent=threads.length+" threads";
+  $("threadCount").textContent=threads.length+" THREADS";
   if(selectedTid===null&&threads.length)selectedTid=threads[0].id;
   if(!threads.some(t=>t.id===selectedTid)&&threads.length)selectedTid=threads[0].id;
-  $("threads").innerHTML=threads.map(t=>{
-    return '<tr data-tid="'+t.id+'" class="'+(t.id===selectedTid?'selected':'')+'"><td>'+t.id+'</td><td class="thread-name">'+esc(t.name||"(unnamed)")+'</td><td>'+(t.id===selectedTid&&selectedRegisters?esc(selectedRegisters.rip):"—")+'</td></tr>';
-  }).join("")||'<tr><td colspan="3" class="empty">No inspectable threads.</td></tr>';
+  $("threads").innerHTML=threads.map(t=>'<tr data-tid="'+t.id+'" class="'+(t.id===selectedTid?"selected":"")+'"><td>'+t.id+'</td><td class="thread-name">'+esc(t.name||"(unnamed)")+'</td><td>'+(t.id===selectedTid&&selectedRegisters?esc(selectedRegisters.rip):"—")+'</td></tr>').join("")||'<tr><td colspan="3" class="empty">No inspectable threads.</td></tr>';
   $("threads").querySelectorAll("tr[data-tid]").forEach(row=>row.addEventListener("click",()=>{
     selectedTid=Number(row.dataset.tid);selectedRegisters=null;renderThreads(latestThreads);refreshRegisters();
+    if(latestStatus&&latestStatus.state==="paused")refreshStack();
   }));
   const selected=threads.find(t=>t.id===selectedTid);
   $("selectedThread").textContent=selected?"TID "+selected.id:"No thread selected";
@@ -152,41 +336,92 @@ function renderThreads(threads){
 function renderBreakpoints(rows){
   $("breakpoints").innerHTML=rows.map(bp=>'<tr><td>'+esc(bp.address)+'</td><td><span class="tag">'+esc(bp.original_byte)+'</span></td><td><button class="danger" data-remove="'+esc(bp.address)+'">Remove</button></td></tr>').join("")||'<tr><td colspan="3" class="empty">No breakpoints set.</td></tr>';
   $("breakpoints").querySelectorAll("[data-remove]").forEach(button=>button.addEventListener("click",async()=>{
-    try{await api("/api/breakpoints/remove?address="+encodeURIComponent(button.dataset.remove),"POST");await refreshBreakpoints();}
+    try{await api("/api/breakpoints/remove?address="+encodeURIComponent(button.dataset.remove),"POST");await refreshBreakpoints();await refreshStatus();}
     catch(error){alert(error.message);}
   }));
 }
-async function refreshStatus(){try{renderStatus(await api("/api/status"));}catch(error){$("stateText").textContent=error.message;}}
-async function refreshThreads(){try{renderThreads(await api("/api/threads"));await refreshRegisters();}catch(error){$("threadCount").textContent=error.message;}}
+function renderStack(data){
+  lastStack=data.frames||[];
+  $("stackCount").textContent=lastStack.length+" FRAMES";
+  $("stackHeadline").textContent=latestStatus&&latestStatus.reason==="io-breakpoint"?"File I/O caller stack":("Stopped at "+(latestStatus?.hit_address||"unknown address"));
+  $("stackSub").textContent="Thread "+data.thread_id+" · "+data.stack_low+" — "+data.stack_high;
+  $("stackFrames").innerHTML=lastStack.map(frame=>{
+    const isTitle=latestStatus&&latestStatus.title&&frame.location.toLowerCase().includes(latestStatus.title.toLowerCase());
+    const current=frame.index===0;
+    return '<tr class="'+(isTitle?"title-frame ":"")+(current?"current-frame":"")+'"><td>'+frame.index+'</td><td><button class="stack-frame" data-address="'+esc(frame.address)+'">'+esc(frame.address)+'</button></td><td>'+esc(frame.location)+'</td></tr>';
+  }).join("")||'<tr><td colspan="3" class="empty">No frames recovered.</td></tr>';
+  $("stackFrames").querySelectorAll("[data-address]").forEach(button=>button.addEventListener("click",()=>{
+    $("memoryAddress").value=button.dataset.address;
+    loadMemory();
+  }));
+}
+async function refreshStack(){
+  if(!latestStatus||latestStatus.state!=="paused"||selectedTid===null)return;
+  try{
+    const data=await api("/api/stack?thread="+selectedTid);
+    renderStack(data);
+  }catch(error){
+    $("stackCount").textContent="STACK UNAVAILABLE";
+    $("stackHeadline").textContent=error.message;
+  }
+}
+async function refreshStatus(){
+  try{renderStatus(await api("/api/status"));}
+  catch(error){$("stateText").textContent=error.message;}
+}
+async function refreshThreads(){
+  try{renderThreads(await api("/api/threads"));}
+  catch(error){$("threadCount").textContent=error.message;}
+}
 async function refreshRegisters(){
   if(selectedTid===null){selectedRegisters=null;renderRegisters(null);return;}
   try{
     const data=await api("/api/registers?thread="+selectedTid);
-    selectedRegisters=data.registers;
-    renderRegisters(selectedRegisters);
-    renderThreads(latestThreads);
-  }catch(error){
-    selectedRegisters=null;
-    renderRegisters(null);
-    renderThreads(latestThreads);
-  }
+    selectedRegisters=data.registers;renderRegisters(selectedRegisters);renderThreads(latestThreads);
+  }catch(error){selectedRegisters=null;renderRegisters(null);}
 }
-async function refreshBreakpoints(){try{renderBreakpoints(await api("/api/breakpoints"));}catch(error){showError(error);}}
-async function refreshAll(){await refreshStatus();await Promise.all([refreshThreads(),refreshBreakpoints()]);}
+async function refreshBreakpoints(){
+  try{renderBreakpoints(await api("/api/breakpoints"));}
+  catch(error){showError(error);}
+}
+async function refreshIoConfig(){
+  try{
+    const data=await api("/api/io/breakpoints");
+    $("ioRead").checked=data.read;
+    $("ioWrite").checked=data.write;
+    $("ioPath").value=data.path_filter||"";
+    $("ioConfigInfo").textContent=(data.read?"READ ":"")+(data.write?"WRITE ":"")+
+      ((data.read||data.write)?"breakpoints armed":"I/O breakpoints disabled")+
+      (data.path_filter?" · path contains \""+data.path_filter+"\"":"");
+  }catch(error){showError(error,"ioConfigInfo");}
+}
+async function refreshIoEvents(){
+  try{
+    const events=await api("/api/io/events");
+    $("ioEvents").innerHTML=events.slice().reverse().map(event=>
+      '<tr class="io-event-row"><td class="'+(event.operation==="read"?"op-read":"op-write")+'">'+esc(event.operation.toUpperCase())+'</td><td><div>'+esc(event.path)+'</div><div class="hint">'+esc(event.api)+(event.offset?" · "+esc(event.offset):"")+'</div></td><td>'+Number(event.size).toLocaleString()+'</td></tr>'
+    ).join("")||'<tr><td colspan="3" class="empty">No file events yet.</td></tr>';
+  }catch(error){$("ioEvents").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';}
+}
+async function refreshAll(){
+  await refreshStatus();
+  await Promise.all([refreshThreads(),refreshRegisters(),refreshBreakpoints(),refreshIoConfig(),refreshIoEvents()]);
+  if(latestStatus&&latestStatus.state==="paused")await refreshStack();
+}
 function renderRegions(data,append){
-  const html=data.regions.map(r=>'<tr data-address="'+esc(r.base)+'"><td>'+esc(r.base)+'</td><td>'+esc(r.size)+'</td><td>'+esc(r.type)+'</td><td>'+esc(r.state)+'</td><td>'+esc(r.protect)+'</td></tr>').join("");
-  if(!append)$("regions").innerHTML=html||'<tr><td colspan="5" class="empty">No regions returned.</td></tr>';
+  const html=data.regions.map(r=>'<tr data-address="'+esc(r.base)+'"><td>'+esc(r.base)+'</td><td>'+esc(r.size)+'</td><td>'+esc(r.type)+'</td><td>'+esc(r.protect)+'</td></tr>').join("");
+  if(!append)$("regions").innerHTML=html||'<tr><td colspan="4" class="empty">No regions returned.</td></tr>';
   else $("regions").insertAdjacentHTML("beforeend",html);
   $("regions").querySelectorAll("tr[data-address]").forEach(row=>row.addEventListener("click",()=>{
-    $("memoryAddress").value=row.dataset.address;$("readMemory").click();
+    $("memoryAddress").value=row.dataset.address;loadMemory();
   }));
   regionCursor=data.next;
-  $("regionInfo").textContent=$("regions").querySelectorAll("tr[data-address]").length+" mapped regions shown";
+  $("regionInfo").textContent=$("regions").querySelectorAll("tr[data-address]").length+" regions shown";
   $("moreRegions").disabled=data.done;
 }
 async function loadRegions(append=false){
   if(!append)regionCursor="0x0";
-  try{const data=await api("/api/regions?cursor="+encodeURIComponent(regionCursor)+"&limit=250");renderRegions(data,append);}
+  try{renderRegions(await api("/api/regions?cursor="+encodeURIComponent(regionCursor)+"&limit=250"),append);}
   catch(error){$("regionInfo").textContent=error.message;}
 }
 async function loadMemory(){
@@ -195,33 +430,69 @@ async function loadMemory(){
     const length=Math.max(1,Math.min(4096,Number($("memoryLength").value)||256));
     const data=await api("/api/memory?address="+encodeURIComponent(address)+"&length="+length);
     $("memoryInfo").textContent=data.address+" · "+data.read+"/"+data.requested+" bytes";
+    $("memoryInfo").className="hint";
     const rows=[];
     for(let i=0;i<data.hex.length;i+=16){
-      const hex=data.hex.slice(i,i+16);
-      const ascii=data.ascii.slice(i,i+16);
+      const hex=data.hex.slice(i,i+16),ascii=data.ascii.slice(i,i+16);
       const addr=(BigInt(data.address)+BigInt(i)).toString(16).padStart(16,"0");
       rows.push('<div class="mem-row"><span class="mem-addr">'+addr+'</span><span class="mem-hex">'+hex.join(" ").padEnd(47," ")+'</span><span class="mem-ascii">'+esc(ascii)+'</span></div>');
     }
     $("memoryView").innerHTML=rows.join("")||"No readable bytes at this address.";
   }catch(error){showError(error);}
 }
+async function waitForStops(){
+  if(waitLoopRunning)return;
+  waitLoopRunning=true;
+  while(true){
+    try{
+      if(latestStatus&&latestStatus.state==="paused"){
+        await new Promise(resolve=>setTimeout(resolve,250));
+        continue;
+      }
+      const result=await api("/api/wait?timeout_ms=30000");
+      if(result.status){
+        renderStatus(result.status);
+        if(result.status.state==="paused"){
+          await Promise.all([refreshThreads(),refreshRegisters(),refreshStack(),refreshIoEvents()]);
+        }else{
+          await refreshStatus();
+        }
+      }
+    }catch(error){
+      await new Promise(resolve=>setTimeout(resolve,700));
+    }
+  }
+}
+
 $("pauseBtn").addEventListener("click",async()=>{try{await api("/api/pause","POST");await refreshAll();}catch(error){alert(error.message);}});
-$("continueBtn").addEventListener("click",async()=>{try{await api("/api/resume","POST");await refreshAll();}catch(error){alert(error.message);}});
-$("stepBtn").addEventListener("click",async()=>{try{await api("/api/step","POST");await refreshAll();}catch(error){alert(error.message);}});
+$("continueBtn").addEventListener("click",async()=>{try{await api("/api/resume","POST");await refreshStatus();}catch(error){alert(error.message);}});
+$("stepBtn").addEventListener("click",async()=>{try{await api("/api/step","POST");await refreshStatus();}catch(error){alert(error.message);}});
 $("refreshRegions").addEventListener("click",()=>loadRegions(false));
 $("moreRegions").addEventListener("click",()=>loadRegions(true));
 $("readMemory").addEventListener("click",loadMemory);
 $("memoryAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadMemory();});
+$("refreshStack").addEventListener("click",refreshStack);
+$("refreshIo").addEventListener("click",refreshIoEvents);
+$("applyIo").addEventListener("click",async()=>{
+  try{
+    const path=encodeURIComponent($("ioPath").value.trim());
+    await api("/api/io/breakpoints?read="+$("ioRead").checked+"&write="+$("ioWrite").checked+"&path="+path,"POST");
+    await refreshIoConfig();
+  }catch(error){alert(error.message);}
+});
 $("addBreakpoint").addEventListener("click",async()=>{
   const address=$("breakpointAddress").value.trim();
   if(!address)return;
   try{await api("/api/breakpoints/add?address="+encodeURIComponent(address),"POST");$("breakpointAddress").value="";await refreshBreakpoints();await refreshStatus();}
   catch(error){alert(error.message);}
 });
+$("breakpointAddress").addEventListener("keydown",event=>{if(event.key==="Enter")$("addBreakpoint").click();});
 refreshAll();
-setInterval(refreshStatus,700);
-setInterval(refreshThreads,1800);
-setInterval(refreshBreakpoints,2500);
+waitForStops();
+setInterval(refreshStatus,1500);
+setInterval(refreshThreads,2500);
+setInterval(refreshBreakpoints,4000);
+setInterval(refreshIoEvents,2500);
 </script>
 </body>
 </html>
