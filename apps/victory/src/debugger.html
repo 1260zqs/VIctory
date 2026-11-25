@@ -60,13 +60,13 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
     <div class="col">
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Virtual memory regions</span><button id="refreshRegions">Refresh</button></div>
-        <div class="scroll" style="max-height:470px"><table><thead><tr><th>Base</th><th>Size</th><th>Type</th><th>State</th><th>Protection</th></tr></thead><tbody id="regions"><tr><td colspan="5" class="empty">Press Refresh to enumerate regions.</td></tr></tbody></table></div>
+        <div class="scroll" style="max-height:470px"><table><thead><tr><th>Base (IDA/native)</th><th>Size</th><th>Type</th><th>State</th><th>Protection</th></tr></thead><tbody id="regions"><tr><td colspan="5" class="empty">Press Refresh to enumerate regions.</td></tr></tbody></table></div>
         <div class="panel-body" style="border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><span class="hint" id="regionInfo">VirtualQuery snapshot</span><button id="moreRegions" disabled>Load next page</button></div>
       </div>
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Memory viewer</span><span class="hint">ReadProcessMemory</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="memoryAddress" value="" placeholder="IDA VA, e.g. 0x140001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
+          <div class="toolbar"><input id="memoryAddress" value="" placeholder="IDA or native VA, e.g. 0x140001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
           <div id="memoryInfo" class="hint" style="margin:9px 0">Enter an address or click a memory region.</div>
           <div id="memoryView" class="memory">No memory loaded.</div>
         </div>
@@ -77,8 +77,8 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
       <div class="panel">
         <div class="panel-head"><span class="panel-title">Software breakpoints</span><span class="tag">INT3</span></div>
         <div class="panel-body">
-          <div class="toolbar"><input id="breakpointAddress" placeholder="IDA VA, e.g. 0x140123456"><button id="addBreakpoint" class="primary">Add</button></div>
-          <div class="hint" style="margin-top:8px">Paste IDA EAs directly. Title-image addresses are translated to their runtime mapping; other process addresses remain native.</div>
+          <div class="toolbar"><input id="breakpointAddress" placeholder="IDA EA, e.g. 0x140123456"><button id="addBreakpoint" class="primary">Add</button></div>
+          <div class="hint" style="margin-top:8px">Paste IDA EAs directly for the title image. Addresses outside the title image (host DLLs, stacks, etc.) use their native process VA.</div>
         </div>
         <div class="scroll"><table><thead><tr><th>Address</th><th>Original</th><th></th></tr></thead><tbody id="breakpoints"><tr><td colspan="3" class="empty">No breakpoints set.</td></tr></tbody></table></div>
       </div>
