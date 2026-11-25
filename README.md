@@ -129,7 +129,8 @@ victory lib-exports <import.lib> [--list]
 victory shader-info [paths...] [--verbose] [--disasm] [--effects]
 victory translate [paths...] [--validate] [--pipelines] [--list] [--jobs N]
 victory translate [paths...] --cache [--pipelines] [--jobs N]
-victory run <exe> [--execute] [--unimplemented trap|zero] [--strict]
+victory run <exe> [--execute] [--wait-for-debugger]
+            [--unimplemented trap|zero] [--strict]
             [--console series-x|series-s] [-- <title arguments>]
 victory config
 ```
@@ -164,6 +165,29 @@ cargo build --profile diag -p victory --features diagnostics   # target\diag\vic
 ```
 
 The on/off switches below (`...=1`) are off when unset or set to `0`.
+
+To attach IDA (or WinDbg) before the Xbox entry point executes, run:
+
+```powershell
+target\\release\\victory.exe run <game dir>\\<the title's exe> --execute --wait-for-debugger
+```
+
+VIctory maps the title and binds its imports, then writes
+`ida-debug-map.txt` beside the title's data/temp folder under
+`%LOCALAPPDATA%\\victory\\data\\<title-id>\\`. It waits until a native
+debugger is attached to `victory.exe`, then raises a breakpoint before
+starting the title's original entry point. In IDA, attach its local Windows
+debugger to `victory.exe`, continue the initial attach breakpoint, and the
+intentional VIctory breakpoint will stop before guest code runs.
+
+Open the same original executable in IDA. The map records the BLAKE3 build
+hash, IDA's expected image base, the runtime module base, image size and
+entry point. For an IDA address, calculate the live address as
+`runtime_base + (ida_ea - ida_image_base)`; for an RVA, use
+`runtime_base + rva`. Check `build_blake3` against the executable you
+opened in IDA before trusting the mapping. The runtime image is a prepared
+copy named `victory-image-<hash>.dll`; the original executable remains the
+static-analysis input.
 
 | Variable | Effect |
 |----------|--------|
