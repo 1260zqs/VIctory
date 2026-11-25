@@ -41,6 +41,7 @@ pub fn run(
     unimplemented: Unimplemented,
     strict: bool,
     execute: bool,
+    wait_for_debugger: bool,
     console: Console,
 ) -> Result<u32> {
     use std::sync::Arc;
@@ -73,6 +74,7 @@ pub fn run(
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
     let image = victory_loader::load(&prepared, &images)?;
+    let runtime_image_path = images.join(prepared.file_name());
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
     println!(
@@ -184,6 +186,12 @@ pub fn run(
     victory_hle::runtime::set_title_dll_loader(Box::new(move |file| {
         late.load(file, show).map_err(|e| format!("{e:#}"))
     }));
+    if wait_for_debugger {
+        let map_path = temp.with_file_name("ida-debug-map.txt");
+        write_ida_debug_map(&map_path, exe, &hash, &runtime_image_path, &image)?;
+        println!("IDA debug map  {}", map_path.display());
+        victory_loader::wait_for_debugger();
+    }
     // SAFETY: imports are bound; from here on we run title code.
     let main = unsafe { Arc::new(image).spawn_main(dlls)? };
     let code = main
@@ -191,6 +199,34 @@ pub fn run(
         .map_err(|_| anyhow::anyhow!("title main thread panicked"))??;
     println!("title exited with {code}");
     Ok(code)
+}
+
+#[cfg(windows)]
+fn write_ida_debug_map(
+    path: &Path,
+    exe: &Path,
+    build_hash: &str,
+    runtime_module_path: &Path,
+    image: &victory_loader::LoadedImage,
+) -> Result<()> {
+    let info = image.info();
+    let runtime_base = image.base();
+    let ida_base = info.image_base;
+    let contents = format!(
+        "format=VICTORY_IDA_DEBUG_MAP_V1\nsource_executable={}\nbuild_blake3={}\nruntime_module_path={}\nida_image_base={:#x}\nruntime_base={:#x}\nimage_size={:#x}\nentry_rva={:#x}\nentry_ida={:#x}\nentry_runtime={:#x}\naddress_rule=runtime_base+(ida_ea-ida_image_base)\n",
+        exe.display(),
+        build_hash,
+        runtime_module_path.display(),
+        ida_base,
+        runtime_base,
+        info.size_of_image,
+        info.entry_rva,
+        ida_base + u64::from(info.entry_rva),
+        runtime_base + info.entry_rva as usize,
+    );
+    std::fs::write(path, contents)
+        .with_context(|| format!("writing IDA debug map {}", path.display()))?;
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -545,6 +581,6 @@ mod cpu_check_tests {
 }
 
 #[cfg(not(windows))]
-pub fn run(_: &Path, _: Unimplemented, _: bool, _: bool, _: Console) -> Result<u32> {
+pub fn run(_: &Path, _: Unimplemented, _: bool, _: bool, _: bool, _: Console) -> Result<u32> {
     anyhow::bail!("running titles requires Windows")
 }
