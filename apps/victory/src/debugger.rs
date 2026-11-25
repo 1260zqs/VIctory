@@ -1053,6 +1053,7 @@ fn write_memory(runtime: &Runtime, address: usize, bytes: &[u8]) -> Result<(), S
             &mut written,
         )
     } != 0 && written == bytes.len();
+    let write_error = (!write_ok).then(|| std::io::Error::last_os_error().to_string());
 
     let mut ignored = 0u32;
     // SAFETY: restores the protection returned by the successful VirtualProtect call.
@@ -1063,8 +1064,8 @@ fn write_memory(runtime: &Runtime, address: usize, bytes: &[u8]) -> Result<(), S
             std::io::Error::last_os_error()
         ));
     }
-    if !write_ok {
-        return Err(std::io::Error::last_os_error().to_string());
+    if let Some(error) = write_error {
+        return Err(error);
     }
 
     if matches!(old_protect & 0xff, 0x10 | 0x20 | 0x40 | 0x80) {
