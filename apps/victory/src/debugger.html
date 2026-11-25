@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VIctory Runtime Debugger</title>
+<style>
+:root{color-scheme:dark;--bg:#0b0e13;--panel:#121821;--panel2:#0e141c;--line:#263241;--muted:#8794a5;--text:#e5edf7;--accent:#78a9ff;--green:#58d69b;--red:#ff7474;--amber:#e8bc68}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 Inter,Segoe UI,Arial,sans-serif}
+button,input,select{font:inherit;color:inherit}button{border:1px solid var(--line);background:#1a2431;border-radius:6px;padding:7px 12px;cursor:pointer}button:hover{border-color:#5479aa;background:#202e40}button:disabled{opacity:.38;cursor:not-allowed}
+input{background:#0c1219;border:1px solid var(--line);border-radius:6px;padding:8px 10px;outline:none}input:focus{border-color:var(--accent)}
+.top{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#10161e;position:sticky;top:0;z-index:5}
+.brand{display:flex;align-items:center;gap:12px;font-weight:700;letter-spacing:.08em}.mark{width:25px;height:25px;border-radius:7px;background:linear-gradient(135deg,#7eb3ff,#5366c8);display:grid;place-items:center;color:#08111d;font-weight:900}
+.subbrand{font-size:11px;color:var(--muted);font-weight:500;letter-spacing:0}
+.actions{display:flex;gap:8px;align-items:center}.state{display:flex;align-items:center;gap:8px;margin-right:12px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px #58d69b55}.dot.paused{background:var(--amber);box-shadow:0 0 12px #e8bc6855}
+.primary{background:#26466f;border-color:#416b9e}.danger{border-color:#683d42;background:#321d22;color:#ffb6b6}
+main{max-width:1680px;margin:0 auto;padding:18px 22px 32px}.summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.metric,.panel{background:var(--panel);border:1px solid var(--line);border-radius:9px}.metric{padding:12px 14px;min-width:0}.metric .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em}.metric .v{font:600 14px/1.4 Consolas,monospace;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.layout{display:grid;grid-template-columns:minmax(300px, .9fr) minmax(440px,1.25fr) minmax(360px,1fr);gap:12px;align-items:start}
+.col{display:flex;flex-direction:column;gap:12px;min-width:0}.panel{overflow:hidden}.panel-head{padding:11px 14px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}.panel-title{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}.hint{color:var(--muted);font-size:11px}.panel-body{padding:12px 14px}.toolbar{display:flex;gap:7px;align-items:center}.toolbar input{min-width:0;flex:1}
+table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{text-align:left;color:var(--muted);font:600 10px/1.4 Inter,Segoe UI,Arial,sans-serif;text-transform:uppercase;letter-spacing:.08em;background:var(--panel2);position:sticky;top:0}td,th{padding:8px 9px;border-bottom:1px solid #222d39;white-space:nowrap}tbody tr:hover{background:#1b2938}tbody tr.selected{background:#1b3049}tbody tr{cursor:pointer}
+.scroll{max-height:270px;overflow:auto}.thread-name{font:12px Inter,Segoe UI,Arial,sans-serif;max-width:190px;overflow:hidden;text-overflow:ellipsis}
+.regs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}.reg{display:flex;justify-content:space-between;gap:10px;background:#0d141c;border:1px solid #202c39;border-radius:5px;padding:6px 8px}.reg b{color:#93a5ba;font-weight:600}.reg code{font:12px Consolas,monospace;color:#d8e6f7}
+.memory{font:12px/1.6 Consolas,monospace;white-space:pre;overflow:auto;background:#090e14;border:1px solid #202a36;border-radius:6px;padding:10px;min-height:130px;color:#c9d8e8}.mem-row{display:flex;gap:16px}.mem-addr{color:#7898bd}.mem-hex{color:#d6e5f6}.mem-ascii{color:#8fa38e}
+.tag{border:1px solid #34465b;border-radius:4px;padding:2px 5px;color:#a8c4e7;font-size:10px}.empty{padding:18px;text-align:center;color:var(--muted)}.error{color:#ff9292;padding:8px 0}.foot{color:var(--muted);font-size:11px;margin-top:12px}
+@media(max-width:1200px){.layout{grid-template-columns:1fr 1fr}.layout>.col:last-child{grid-column:1/-1}.summary{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:760px){main{padding:12px}.top{padding:0 12px}.layout{grid-template-columns:1fr}.layout>.col:last-child{grid-column:auto}.summary{grid-template-columns:repeat(2,1fr)}.subbrand{display:none}.actions{gap:5px}.actions button{padding:6px 8px}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="mark">V</div><div>VICTORY <span class="subbrand">/ RUNTIME DEBUGGER</span></div></div>
+  <div class="actions">
+    <div class="state"><span id="stateDot" class="dot"></span><span id="stateText">Connecting…</span></div>
+    <button id="pauseBtn">Pause</button><button id="continueBtn" class="primary" disabled>Continue</button><button id="stepBtn" disabled>Step</button>
+  </div>
+</header>
+<main>
+  <section class="summary">
+    <div class="metric"><div class="k">Process</div><div class="v" id="pid">—</div></div>
+    <div class="metric"><div class="k">Runtime image base</div><div class="v" id="base">—</div></div>
+    <div class="metric"><div class="k">Image size</div><div class="v" id="imageSize">—</div></div>
+    <div class="metric"><div class="k">Entry point</div><div class="v" id="entry">—</div></div>
+    <div class="metric"><div class="k">Breakpoints</div><div class="v" id="bpCount">0</div></div>
+  </section>
+
+  <section class="layout">
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Threads</span><span class="hint" id="threadCount">—</span></div>
+        <div class="scroll"><table><thead><tr><th style="width:58px">TID</th><th>Name</th><th>RIP</th></tr></thead><tbody id="threads"><tr><td colspan="3" class="empty">Waiting for runtime…</td></tr></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Registers</span><span class="hint" id="selectedThread">No thread selected</span></div>
+        <div class="panel-body"><div id="registers" class="regs"><div class="empty">Select a thread to inspect its context.</div></div></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Virtual memory regions</span><button id="refreshRegions">Refresh</button></div>
+        <div class="scroll" style="max-height:470px"><table><thead><tr><th>Base</th><th>Size</th><th>Type</th><th>State</th><th>Protection</th></tr></thead><tbody id="regions"><tr><td colspan="5" class="empty">Press Refresh to enumerate regions.</td></tr></tbody></table></div>
+        <div class="panel-body" style="border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center"><span class="hint" id="regionInfo">VirtualQuery snapshot</span><button id="moreRegions" disabled>Load next page</button></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Memory viewer</span><span class="hint">ReadProcessMemory</span></div>
+        <div class="panel-body">
+          <div class="toolbar"><input id="memoryAddress" value="" placeholder="Address, e.g. 0x7FF900001000"><input id="memoryLength" value="256" style="width:72px;flex:0 0 72px"><button id="readMemory" class="primary">Read</button></div>
+          <div id="memoryInfo" class="hint" style="margin:9px 0">Enter an address or click a memory region.</div>
+          <div id="memoryView" class="memory">No memory loaded.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Software breakpoints</span><span class="tag">INT3</span></div>
+        <div class="panel-body">
+          <div class="toolbar"><input id="breakpointAddress" placeholder="Runtime address, e.g. 0x7FF90BC71EC8"><button id="addBreakpoint" class="primary">Add</button></div>
+          <div class="hint" style="margin-top:8px">Addresses are runtime virtual addresses. IDA EAs can be converted with the preferred/runtime image bases above.</div>
+        </div>
+        <div class="scroll"><table><thead><tr><th>Address</th><th>Original</th><th></th></tr></thead><tbody id="breakpoints"><tr><td colspan="3" class="empty">No breakpoints set.</td></tr></tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-title">Runtime information</span><span class="hint" id="uptime">—</span></div>
+        <div class="panel-body">
+          <div class="hint">Title</div><div id="title" style="margin-bottom:10px">—</div>
+          <div class="hint">Build BLAKE3</div><div id="hash" style="font:11px Consolas,monospace;overflow-wrap:anywhere;margin:4px 0 12px">—</div>
+          <div class="hint">Preferred image base</div><div id="preferredBase" style="font:12px Consolas,monospace;margin-top:4px">—</div>
+          <div class="hint" style="margin-top:12px">Stop reason</div><div id="stopReason" style="margin-top:4px">—</div>
+          <div class="hint" style="margin-top:12px">Debugger endpoint</div><div style="font:12px Consolas,monospace;margin-top:4px">127.0.0.1 (loopback only)</div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="foot">VIctory inspects its own native x64 process. Memory addresses and register values are shown as hexadecimal strings to preserve 64-bit precision.</div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let latestStatus=null, selectedTid=null, latestThreads=[];
+let regionCursor="0x0";
+const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function api(path,method="GET"){
+  const response=await fetch(path,{method,cache:"no-store"});
+  const data=await response.json();
+  if(!response.ok)throw new Error(data.error||response.statusText);
+  return data;
+}
+function showError(error){$("memoryInfo").textContent=error.message||String(error);$("memoryInfo").className="error";}
+function renderStatus(s){
+  latestStatus=s;
+  const paused=s.state==="paused";
+  $("stateDot").className=paused?"dot paused":"dot";
+  $("stateText").textContent=paused?"Paused":"Running";
+  $("pauseBtn").disabled=paused;
+  $("continueBtn").disabled=!paused;
+  $("stepBtn").disabled=!paused||s.reason==="manual";
+  $("pid").textContent=s.pid;
+  $("base").textContent=s.base;
+  $("imageSize").textContent=s.image_size;
+  $("entry").textContent=s.entry_runtime;
+  $("bpCount").textContent=s.breakpoint_count;
+  $("title").textContent=s.title;
+  $("hash").textContent=s.build_hash;
+  $("preferredBase").textContent=s.preferred_base;
+  $("uptime").textContent=s.uptime_seconds+" sec";
+  $("stopReason").textContent=s.hit_address?s.reason+" at "+s.hit_address+" (TID "+s.hit_thread+")":s.reason;
+}
+const registerOrder=["rax","rbx","rcx","rdx","rsi","rdi","rbp","rsp","rip","r8","r9","r10","r11","r12","r13","r14","r15","rflags"];
+function renderRegisters(regs){
+  if(!regs){$("registers").innerHTML='<div class="empty">Context unavailable for this thread.</div>';return;}
+  $("registers").innerHTML=registerOrder.map(name=>'<div class="reg"><b>'+name.toUpperCase()+'</b><code>'+esc(regs[name])+'</code></div>').join("");
+}
+function renderThreads(threads){
+  latestThreads=threads;
+  $("threadCount").textContent=threads.length+" threads";
+  if(selectedTid===null&&threads.length)selectedTid=threads[0].id;
+  if(!threads.some(t=>t.id===selectedTid)&&threads.length)selectedTid=threads[0].id;
+  $("threads").innerHTML=threads.map(t=>{
+    const regs=t.registers;
+    return '<tr data-tid="'+t.id+'" class="'+(t.id===selectedTid?'selected':'')+'"><td>'+t.id+'</td><td class="thread-name">'+esc(t.name||"(unnamed)")+'</td><td>'+(regs?esc(regs.rip):"—")+'</td></tr>';
+  }).join("")||'<tr><td colspan="3" class="empty">No inspectable threads.</td></tr>';
+  $("threads").querySelectorAll("tr[data-tid]").forEach(row=>row.addEventListener("click",()=>{
+    selectedTid=Number(row.dataset.tid);renderThreads(latestThreads);
+  }));
+  const selected=threads.find(t=>t.id===selectedTid);
+  $("selectedThread").textContent=selected?"TID "+selected.id:"No thread selected";
+  renderRegisters(selected&&selected.registers);
+}
+function renderBreakpoints(rows){
+  $("breakpoints").innerHTML=rows.map(bp=>'<tr><td>'+esc(bp.address)+'</td><td><span class="tag">'+esc(bp.original_byte)+'</span></td><td><button class="danger" data-remove="'+esc(bp.address)+'">Remove</button></td></tr>').join("")||'<tr><td colspan="3" class="empty">No breakpoints set.</td></tr>';
+  $("breakpoints").querySelectorAll("[data-remove]").forEach(button=>button.addEventListener("click",async()=>{
+    try{await api("/api/breakpoints/remove?address="+encodeURIComponent(button.dataset.remove),"POST");await refreshBreakpoints();}
+    catch(error){alert(error.message);}
+  }));
+}
+async function refreshStatus(){try{renderStatus(await api("/api/status"));}catch(error){$("stateText").textContent=error.message;}}
+async function refreshThreads(){try{renderThreads(await api("/api/threads"));}catch(error){$("threadCount").textContent=error.message;}}
+async function refreshBreakpoints(){try{renderBreakpoints(await api("/api/breakpoints"));}catch(error){showError(error);}}
+async function refreshAll(){await refreshStatus();await Promise.all([refreshThreads(),refreshBreakpoints()]);}
+function renderRegions(data,append){
+  const html=data.regions.map(r=>'<tr data-address="'+esc(r.base)+'"><td>'+esc(r.base)+'</td><td>'+esc(r.size)+'</td><td>'+esc(r.type)+'</td><td>'+esc(r.state)+'</td><td>'+esc(r.protect)+'</td></tr>').join("");
+  if(!append)$("regions").innerHTML=html||'<tr><td colspan="5" class="empty">No regions returned.</td></tr>';
+  else $("regions").insertAdjacentHTML("beforeend",html);
+  $("regions").querySelectorAll("tr[data-address]").forEach(row=>row.addEventListener("click",()=>{
+    $("memoryAddress").value=row.dataset.address;$("readMemory").click();
+  }));
+  regionCursor=data.next;
+  $("regionInfo").textContent=$("regions").querySelectorAll("tr[data-address]").length+" mapped regions shown";
+  $("moreRegions").disabled=data.done;
+}
+async function loadRegions(append=false){
+  if(!append)regionCursor="0x0";
+  try{const data=await api("/api/regions?cursor="+encodeURIComponent(regionCursor)+"&limit=250");renderRegions(data,append);}
+  catch(error){$("regionInfo").textContent=error.message;}
+}
+async function loadMemory(){
+  try{
+    const address=$("memoryAddress").value.trim();
+    const length=Math.max(1,Math.min(4096,Number($("memoryLength").value)||256));
+    const data=await api("/api/memory?address="+encodeURIComponent(address)+"&length="+length);
+    $("memoryInfo").textContent=data.address+" · "+data.read+"/"+data.requested+" bytes";
+    const rows=[];
+    for(let i=0;i<data.hex.length;i+=16){
+      const hex=data.hex.slice(i,i+16);
+      const ascii=data.ascii.slice(i,i+16);
+      const addr=(BigInt(data.address)+BigInt(i)).toString(16).padStart(16,"0");
+      rows.push('<div class="mem-row"><span class="mem-addr">'+addr+'</span><span class="mem-hex">'+hex.join(" ").padEnd(47," ")+'</span><span class="mem-ascii">'+esc(ascii)+'</span></div>');
+    }
+    $("memoryView").innerHTML=rows.join("")||"No readable bytes at this address.";
+  }catch(error){showError(error);}
+}
+$("pauseBtn").addEventListener("click",async()=>{try{await api("/api/pause","POST");await refreshAll();}catch(error){alert(error.message);}});
+$("continueBtn").addEventListener("click",async()=>{try{await api("/api/resume","POST");await refreshAll();}catch(error){alert(error.message);}});
+$("stepBtn").addEventListener("click",async()=>{try{await api("/api/step","POST");await refreshAll();}catch(error){alert(error.message);}});
+$("refreshRegions").addEventListener("click",()=>loadRegions(false));
+$("moreRegions").addEventListener("click",()=>loadRegions(true));
+$("readMemory").addEventListener("click",loadMemory);
+$("memoryAddress").addEventListener("keydown",event=>{if(event.key==="Enter")loadMemory();});
+$("addBreakpoint").addEventListener("click",async()=>{
+  const address=$("breakpointAddress").value.trim();
+  if(!address)return;
+  try{await api("/api/breakpoints/add?address="+encodeURIComponent(address),"POST");$("breakpointAddress").value="";await refreshBreakpoints();await refreshStatus();}
+  catch(error){alert(error.message);}
+});
+refreshAll();
+setInterval(refreshStatus,700);
+setInterval(refreshThreads,1800);
+setInterval(refreshBreakpoints,2500);
+</script>
+</body>
+</html>

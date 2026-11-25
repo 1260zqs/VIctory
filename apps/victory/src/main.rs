@@ -3,6 +3,8 @@
 //! Every command reads the user's own files and writes only to stdout or to
 //! the user's cache directory (outside the repository).
 
+#[cfg(windows)]
+mod debugger;
 mod census;
 mod inspect;
 mod prebuild;
@@ -112,9 +114,9 @@ enum Command {
         /// Actually start the title. Without it, stop after binding.
         #[arg(long)]
         execute: bool,
-        /// Wait for a native debugger after mapping/binding and before the Xbox entry point.
-        #[arg(long, requires = "execute")]
-        wait_for_debugger: bool,
+        /// Start the in-process HTTP debugger (default port 17890; --debugger=PORT to override).
+        #[arg(long, num_args = 0..=1, default_missing_value = "17890", require_equals = true, requires = "execute")]
+        debugger: Option<u16>,
         /// The console model the title sees (device type, memory).
         #[arg(long, value_enum, default_value_t = Console::SeriesX)]
         console: Console,
@@ -185,11 +187,11 @@ fn main() -> Result<()> {
             unimplemented,
             strict,
             execute,
-            wait_for_debugger,
+            debugger,
             console,
             title_args: _,
         } => {
-            let code = run::run(&exe, unimplemented, strict, execute, wait_for_debugger, console)?;
+            let code = run::run(&exe, unimplemented, strict, execute, debugger, console)?;
             if code != 0 {
                 // Preserve all 32 bits of the Windows process status.
                 std::process::exit(code as i32);

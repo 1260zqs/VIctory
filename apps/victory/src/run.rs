@@ -41,7 +41,7 @@ pub fn run(
     unimplemented: Unimplemented,
     strict: bool,
     execute: bool,
-    wait_for_debugger: bool,
+    debugger_port: Option<u16>,
     console: Console,
 ) -> Result<u32> {
     use std::sync::Arc;
@@ -74,7 +74,6 @@ pub fn run(
     let images = cfg.cache_subdir("images")?;
     victory_hle::modules::d3d12x::use_shader_cache(cfg.cache_subdir("shaders")?);
     let image = victory_loader::load(&prepared, &images)?;
-    let runtime_image_path = images.join(prepared.file_name());
     victory_hle::runtime::set_main_image(image.base());
     victory_hle::runtime::set_image_path(image.base(), exe);
     println!(
@@ -186,11 +185,20 @@ pub fn run(
     victory_hle::runtime::set_title_dll_loader(Box::new(move |file| {
         late.load(file, show).map_err(|e| format!("{e:#}"))
     }));
-    if wait_for_debugger {
-        let map_path = temp.with_file_name("ida-debug-map.txt");
-        write_ida_debug_map(&map_path, exe, &hash, &runtime_image_path, &image)?;
-        println!("IDA debug map  {}", map_path.display());
-        victory_loader::wait_for_debugger();
+    if let Some(port) = debugger_port {
+        let url = crate::debugger::start(
+            port,
+            crate::debugger::DebugTarget {
+                title: exe.file_name().map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| exe.display().to_string()),
+                build_hash: hash.clone(),
+                image_base: image.base(),
+                preferred_base: image.info().image_base,
+                image_size: image.info().size_of_image as usize,
+                entry_rva: image.info().entry_rva,
+            },
+        )?;
+        println!("debugger      {url}");
     }
     // SAFETY: imports are bound; from here on we run title code.
     let main = unsafe { Arc::new(image).spawn_main(dlls)? };
@@ -199,44 +207,6 @@ pub fn run(
         .map_err(|_| anyhow::anyhow!("title main thread panicked"))??;
     println!("title exited with {code}");
     Ok(code)
-}
-
-#[cfg(windows)]
-fn write_ida_debug_map(
-    path: &Path,
-    exe: &Path,
-    build_hash: &str,
-    runtime_module_path: &Path,
-    image: &victory_loader::LoadedImage,
-) -> Result<()> {
-    let info = image.info();
-    let runtime_base = image.base();
-    let ida_base = info.image_base;
-    let runtime_module_name = runtime_module_path
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    let contents = format!(
-        "format=VICTORY_IDA_DEBUG_MAP_V1\nprocess_id={}\nsource_executable={}\nbuild_blake3={}\nruntime_module_name={}\nruntime_module_path={}\nida_image_base={:#x}\nruntime_base={:#x}\nimage_size={:#x}\nentry_rva={:#x}\nentry_ida={:#x}\nentry_runtime={:#x}\naddress_rule=runtime_base+(ida_ea-ida_image_base)\n",
-        std::process::id(),
-        exe.display(),
-        build_hash,
-        runtime_module_name,
-        runtime_module_path.display(),
-        ida_base,
-        runtime_base,
-        info.size_of_image,
-        info.entry_rva,
-        ida_base + u64::from(info.entry_rva),
-        runtime_base + info.entry_rva as usize,
-    );
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("creating IDA debug map folder {}", parent.display()))?;
-    }
-    std::fs::write(path, contents)
-        .with_context(|| format!("writing IDA debug map {}", path.display()))?;
-    Ok(())
 }
 
 #[cfg(windows)]
@@ -596,7 +566,7 @@ pub fn run(
     _: Unimplemented,
     _: bool,
     _: bool,
-    _: bool,
+    _: Option<u16>,
     _: Console,
 ) -> Result<u32> {
     anyhow::bail!("running titles requires Windows")

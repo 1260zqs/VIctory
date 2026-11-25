@@ -129,7 +129,7 @@ victory lib-exports <import.lib> [--list]
 victory shader-info [paths...] [--verbose] [--disasm] [--effects]
 victory translate [paths...] [--validate] [--pipelines] [--list] [--jobs N]
 victory translate [paths...] --cache [--pipelines] [--jobs N]
-victory run <exe> [--execute] [--wait-for-debugger]
+victory run <exe> [--execute] [--debugger[=PORT]]
             [--unimplemented trap|zero] [--strict]
             [--console series-x|series-s] [-- <title arguments>]
 victory config
@@ -158,40 +158,34 @@ the translated shaders do not require it at runtime.
 
 ## Debugging
 
-A release build has no debugging aids. Build them in with
+The in-process runtime debugger is available in regular release builds:
+
+```powershell
+target\release\victory.exe run <game dir>\<the title's exe> --execute --debugger
+```
+
+Open **http://127.0.0.1:17890** in a browser. Use `--debugger=PORT` to choose
+another port. The listener binds only to loopback. It shows the title image
+mapping, live x64 thread registers, virtual memory regions, memory bytes and
+software breakpoints. Pause freezes the other process threads while leaving
+the debugger's HTTP thread responsive. Continue releases them. A breakpoint
+hit stops at the original instruction; Step executes one instruction and
+stops again. Breakpoints are runtime addresses and are installed as native
+x64 `INT3` instructions.
+
+This is an in-process debugger, not a CPU emulator or a remote debugger.
+Memory reads are capped at 4 KiB per request. Pausing all threads can catch a
+thread while it owns a process-wide lock; keep debugger requests read-focused
+while paused and continue promptly if other runtime work is blocked.
+
+Build diagnostics separately when you also need scheduled stack dumps,
+memory-on-crash capture and the other switches below:
 
 ```powershell
 cargo build --profile diag -p victory --features diagnostics   # target\diag\victory.exe
 ```
 
 The on/off switches below (`...=1`) are off when unset or set to `0`.
-
-To attach IDA (or WinDbg) before the Xbox entry point executes, run:
-
-```powershell
-target\release\\victory.exe run <game dir>\\<the title's exe> --execute --wait-for-debugger
-```
-
-VIctory maps the title and binds its imports, then writes
-`ida-debug-map.txt` beside the title's data/temp folder under
-`%LOCALAPPDATA%\victory\data\<title-id>\`. It waits until a native
-debugger is attached to `victory.exe`, then raises a breakpoint before
-starting the title's original entry point. In IDA, attach its local Windows
-debugger to `victory.exe`, continue the initial attach breakpoint, and the
-intentional VIctory breakpoint will stop before guest code runs.
-
-Open the same original executable in IDA. The map records the BLAKE3 build
-hash, IDA's expected image base, the runtime module base, image size and
-entry point. For an IDA address, calculate the live address as
-`runtime_base + (ida_ea - ida_image_base)`; for an RVA, use
-`runtime_base + rva`. Check `build_blake3` against the executable you
-opened in IDA before trusting the mapping. The runtime image is a prepared
-copy named `victory-image-<hash>.dll`; the original executable remains the
-static-analysis input.
-
-This first pass provides the native attach point and address map; it does not
-yet rebase the IDA database or install IDA breakpoints automatically. Those
-steps belong in the IDA-side bridge.
 
 | Variable | Effect |
 |----------|--------|
