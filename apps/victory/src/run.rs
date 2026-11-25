@@ -581,6 +581,13 @@ mod cpu_check_tests {
 }
 
 #[cfg(not(windows))]
-pub fn run(_: &Path, _: Unimplemented, _: bool, _: bool, _: bool, _: Console) -> Result<u32> {
+pub fn run(
+    _: &Path,
+    _: Unimplemented,
+    _: bool,
+    _: bool,
+    _: bool,
+    _: Console,
+) -> Result<u32> {
     anyhow::bail!("running titles requires Windows")
 }
