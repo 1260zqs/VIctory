@@ -42,6 +42,7 @@ pub fn run(
     strict: bool,
     execute: bool,
     debugger_port: Option<u16>,
+    initial_breakpoints: Vec<String>,
     console: Console,
 ) -> Result<u32> {
     use std::sync::Arc;
@@ -197,6 +198,7 @@ pub fn run(
                 image_size: image.info().size_of_image as usize,
                 entry_rva: image.info().entry_rva,
             },
+            &initial_breakpoints,
         )?;
         println!("debugger      {url}");
     }
@@ -567,6 +569,7 @@ pub fn run(
     _: bool,
     _: bool,
     _: Option<u16>,
+    _: Vec<String>,
     _: Console,
 ) -> Result<u32> {
     anyhow::bail!("running titles requires Windows")
