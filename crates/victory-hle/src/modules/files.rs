@@ -333,11 +333,11 @@ pub(crate) fn notify_file_io(event: FileIoEvent) {
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct FileOverlapped {
-    internal: usize,
-    internal_high: usize,
+    _internal: usize,
+    _internal_high: usize,
     offset: u32,
     offset_high: u32,
-    event: Handle,
+    _event: Handle,
 }
 
 fn overlapped_file_offset(overlapped: *mut c_void) -> Option<u64> {
@@ -985,11 +985,11 @@ mod tests {
     #[test]
     fn overlapped_file_offset_combines_high_and_low_words() {
         let mut overlapped = FileOverlapped {
-            internal: 0,
-            internal_high: 0,
+            _internal: 0,
+            _internal_high: 0,
             offset: 0x89ab_cdef,
             offset_high: 0x1234_5678,
-            event: std::ptr::null_mut(),
+            _event: std::ptr::null_mut(),
         };
         let offset = overlapped_file_offset((&mut overlapped as *mut FileOverlapped).cast());
         assert_eq!(offset, Some(0x1234_5678_89ab_cdef));
