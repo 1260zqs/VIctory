@@ -144,6 +144,7 @@ extern "system" fn open_file(_: Factory, path: *const u16, iid: *const Guid, out
     tracing::info!(path = name, iid = iid_text(iid), "dstorage: file opened");
     // SAFETY: a handle we just opened and nobody else owns.
     let file = unsafe { std::fs::File::from_raw_handle(handle) };
+    super::files::forget_file_path(handle);
     let file = Instance::create(
         Object::new("dstorage file", &FILE_VTABLE),
         File { file, path: name.clone() },
