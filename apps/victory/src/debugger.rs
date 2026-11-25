@@ -472,7 +472,7 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     control.hit_registers = Some(Registers::from(&stopped_context));
     control.hit_context = Some(stopped_context);
     control.pending_context = None;
-    control.exception_code = Some(EXCEPTION_BREAKPOINT);
+    control.exception_code = Some(EXCEPTION_BREAKPOINT as u32);
     control.step_thread = Some(thread_id);
     control.step_breakpoint = None;
     control.stop_after_instruction = false;
