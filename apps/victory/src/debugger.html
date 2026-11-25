@@ -345,13 +345,26 @@ function renderBreakpoints(rows){
     catch(error){alert(error.message);}
   }));
 }
+function isTitleFrame(frame){
+  if(!latestStatus)return false;
+  try{
+    const base=BigInt(latestStatus.ida_base);
+    const size=BigInt(latestStatus.image_size);
+    const address=BigInt(frame.address);
+    return address>=base&&address<base+size;
+  }catch{return false;}
+}
 function renderStack(data){
   lastStack=data.frames||[];
   $("stackCount").textContent=lastStack.length+" FRAMES";
-  $("stackHeadline").textContent=latestStatus&&latestStatus.reason==="io-breakpoint"?"File I/O caller stack":("Stopped at "+(latestStatus?.hit_address||"unknown address"));
+  const exception=latestStatus?.exception;
+  const exceptionText=exception?(exception.code+(exception.detail?" · "+exception.detail:"")):null;
+  $("stackHeadline").textContent=latestStatus?.reason==="io-breakpoint"
+    ?"File I/O caller stack"
+    :exceptionText||("Stopped at "+(latestStatus?.hit_address||"unknown address"));
   $("stackSub").textContent="Thread "+data.thread_id+" · "+data.stack_low+" — "+data.stack_high;
   $("stackFrames").innerHTML=lastStack.map(frame=>{
-    const isTitle=latestStatus&&latestStatus.title&&frame.location.toLowerCase().includes(latestStatus.title.toLowerCase());
+    const isTitle=isTitleFrame(frame);
     const current=frame.index===0;
     return '<tr class="'+(isTitle?"title-frame ":"")+(current?"current-frame":"")+'"><td>'+frame.index+'</td><td><button class="stack-frame" data-address="'+esc(frame.address)+'">'+esc(frame.address)+'</button></td><td>'+esc(frame.location)+'</td></tr>';
   }).join("")||'<tr><td colspan="3" class="empty">No frames recovered.</td></tr>';
