@@ -389,6 +389,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.hit_registers = Some(Registers::from(context));
         control.hit_context = Some(*context);
         control.exception_code = None;
+        control.exception_detail = None;
         control.step_thread = Some(thread_id);
         control.step_breakpoint = Some(address);
         control.pending_context = None;
@@ -441,6 +442,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
             control.hit_registers = None;
             control.hit_context = None;
             control.exception_code = None;
+            control.exception_detail = None;
             control.step_thread = None;
             control.step_breakpoint = None;
             runtime.changed.notify_all();
@@ -457,6 +459,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.hit_context = Some(*context);
         control.pending_context = None;
         control.exception_code = None;
+        control.exception_detail = None;
         control.action = Action::Wait;
         runtime.changed.notify_all();
 
@@ -488,6 +491,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
                 control.hit_registers = None;
                 control.hit_context = None;
                 control.exception_code = None;
+                control.exception_detail = None;
                 control.step_thread = None;
                 control.step_breakpoint = None;
                 runtime.changed.notify_all();
@@ -587,6 +591,7 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     control.hit_context = Some(stopped_context);
     control.pending_context = None;
     control.exception_code = Some(EXCEPTION_BREAKPOINT as u32);
+    control.exception_detail = None;
     control.step_thread = Some(thread_id);
     control.step_breakpoint = None;
     control.stop_after_instruction = false;
@@ -608,6 +613,7 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     control.hit_registers = None;
     control.hit_context = None;
     control.exception_code = None;
+    control.exception_detail = None;
     control.step_breakpoint = None;
     control.stop_after_instruction = action == Action::Step;
     if action == Action::Step {
@@ -1097,6 +1103,7 @@ fn handle_file_io(
     control.hit_context = Some(context.0);
     control.pending_context = None;
     control.exception_code = None;
+    control.exception_detail = None;
     control.io_event = Some(event);
     control.step_thread = None;
     control.step_breakpoint = None;
@@ -1116,6 +1123,7 @@ fn handle_file_io(
     control.hit_context = None;
     control.pending_context = None;
     control.exception_code = None;
+    control.exception_detail = None;
     control.io_event = None;
     control.action = Action::Wait;
     runtime.changed.notify_all();
@@ -1177,6 +1185,7 @@ fn status_json(runtime: &Runtime) -> Value {
                 format!("{:#x}", runtime.target.to_ida_address(address))
             }),
             "thread_id": control.hit_thread,
+            "detail": control.exception_detail,
         })),
         "io_event": control.io_event.as_ref().map(io_event_json),
         "breakpoint_count": breakpoints.len(),
@@ -1561,6 +1570,7 @@ fn pause(runtime: &Runtime) {
     control.hit_context = None;
     control.pending_context = None;
     control.exception_code = None;
+    control.exception_detail = None;
     runtime.changed.notify_all();
 }
 
@@ -1580,6 +1590,7 @@ fn continue_or_step(runtime: &Runtime, step: bool) -> Result<(), String> {
         control.hit_registers = None;
         control.hit_context = None;
         control.exception_code = None;
+        control.exception_detail = None;
         runtime.changed.notify_all();
         drop(control);
         resume_peers(runtime);
@@ -1597,8 +1608,16 @@ fn continue_or_step(runtime: &Runtime, step: bool) -> Result<(), String> {
         control.hit_context = None;
         control.pending_context = None;
         control.io_event = None;
+        control.exception_code = None;
+        control.exception_detail = None;
         runtime.changed.notify_all();
         return Ok(());
+    }
+    if control.reason == "exception"
+        && control.exception_code != Some(EXCEPTION_BREAKPOINT as u32)
+        && step
+    {
+        return Err("single-step is not available for this exception; edit RIP or resume to pass it to Windows handlers".into());
     }
     if control.reason != "breakpoint" && control.reason != "step" && control.reason != "exception" {
         return Err("the current stop cannot be stepped".into());
