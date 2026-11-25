@@ -173,8 +173,16 @@ mapping, live x64 thread registers, virtual memory regions, memory bytes and
 software breakpoints. Pause freezes the other process threads while leaving
 the debugger's HTTP thread responsive. Continue releases them. A breakpoint
 hit stops at the original instruction; Step executes one instruction and
-stops again. Breakpoints are runtime addresses and are installed as native
-x64 `INT3` instructions.
+stops again.
+
+The debugger uses IDA virtual addresses for the title executable. Its IDA
+image base comes from the executable's preferred image base (the IDA base for
+this title is `0x140000000`); the UI also shows the actual runtime image base
+and the signed rebase delta (`IDA base - runtime base`). Paste an IDA EA
+directly into Add Breakpoint or Memory Read. The API translates addresses
+inside the title image back to native process addresses before reading memory
+or installing an x64 `INT3`. Other process mappings, such as host DLLs and
+thread stacks, retain their native virtual addresses.
 
 This is an in-process debugger, not a CPU emulator or a remote debugger.
 Memory reads are capped at 4 KiB per request. Pausing all threads can catch a
