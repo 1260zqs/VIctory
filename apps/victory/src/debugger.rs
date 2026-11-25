@@ -1057,17 +1057,23 @@ fn configure_io_breakpoints(
     })
 }
 
-fn io_breakpoint_matches(runtime: &Runtime, event: &victory_hle::modules::files::FileIoEvent) -> bool {
-    let config = runtime.io_breakpoints.lock().unwrap_or_else(|e| e.into_inner()).clone();
+fn io_breakpoint_matches_config(
+    config: &IoBreakpointConfig,
+    event: &victory_hle::modules::files::FileIoEvent,
+) -> bool {
     let enabled = match event.operation.as_str() {
         "read" => config.reads,
         "write" => config.writes,
         _ => false,
     };
-    enabled && (
-        config.path_filter.is_empty()
-            || event.path.to_lowercase().contains(&config.path_filter.to_lowercase())
-    )
+    enabled
+        && (config.path_filter.is_empty()
+            || event.path.to_lowercase().contains(&config.path_filter.to_lowercase()))
+}
+
+fn io_breakpoint_matches(runtime: &Runtime, event: &victory_hle::modules::files::FileIoEvent) -> bool {
+    let config = runtime.io_breakpoints.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    io_breakpoint_matches_config(&config, event)
 }
 
 fn handle_file_io(
@@ -2015,6 +2021,31 @@ mod tests {
         assert_eq!(context.0.EFlags, 0x202);
         assert!(set_context_register(&mut context.0, "xmm0", 0).is_err());
         assert!(set_context_register(&mut context.0, "rflags", u64::MAX).is_err());
+    }
+
+    #[test]
+    fn file_io_breakpoints_filter_operation_and_path_case_insensitively() {
+        let event = victory_hle::modules::files::FileIoEvent {
+            operation: "read".into(),
+            path: "G:\\common.rpf".into(),
+            api: "ReadFile".into(),
+            size: 4096,
+            offset: None,
+        };
+        let config = IoBreakpointConfig {
+            reads: true,
+            writes: false,
+            path_filter: "COMMON.RPF".into(),
+        };
+        assert!(io_breakpoint_matches_config(&config, &event));
+
+        let mut config = config;
+        config.path_filter = "other.rpf".into();
+        assert!(!io_breakpoint_matches_config(&config, &event));
+        config.path_filter.clear();
+        config.writes = true;
+        config.reads = false;
+        assert!(!io_breakpoint_matches_config(&config, &event));
     }
 
     #[test]
