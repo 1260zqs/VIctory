@@ -347,16 +347,13 @@ pub extern "system" fn CreateFileW(
     flags: u32,
     template: Handle,
 ) -> Handle {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("kernel32.dll", "CreateFileW": extern "system" fn(*const u16, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
-        p.ptr(),
-        access,
-        share,
-        security,
-        disposition,
-        flags,
-        template,
-    )
+    let handle = host!("kernel32.dll", "CreateFileW": extern "system" fn(*const u16, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
+        p.ptr(), access, share, security, disposition, flags, template,
+    );
+    remember_file_path(handle, title_path);
+    handle
 }
 
 pub extern "system" fn CreateFileA(
@@ -368,30 +365,17 @@ pub extern "system" fn CreateFileA(
     flags: u32,
     template: Handle,
 ) -> Handle {
-    match narrow(path) {
-        Some(p) => {
-            host!("kernel32.dll", "CreateFileW": extern "system" fn(*const u16, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
-                p.as_ptr(),
-                access,
-                share,
-                security,
-                disposition,
-                flags,
-                template,
-            )
-        }
-        None => {
-            host!("kernel32.dll", "CreateFileA": extern "system" fn(*const c_char, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
-                path,
-                access,
-                share,
-                security,
-                disposition,
-                flags,
-                template,
-            )
-        }
-    }
+    let title_path = narrow_string(path);
+    let handle = match narrow(path) {
+        Some(p) => host!("kernel32.dll", "CreateFileW": extern "system" fn(*const u16, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
+            p.as_ptr(), access, share, security, disposition, flags, template,
+        ),
+        None => host!("kernel32.dll", "CreateFileA": extern "system" fn(*const c_char, u32, u32, *const c_void, u32, u32, Handle) -> Handle)(
+            path, access, share, security, disposition, flags, template,
+        ),
+    };
+    remember_file_path(handle, title_path);
+    handle
 }
 
 /// Used by Bink.
@@ -402,14 +386,13 @@ pub extern "system" fn CreateFile2(
     disposition: u32,
     params: *const c_void,
 ) -> Handle {
+    let title_path = wide_string(path);
     let p = wide(path);
-    host!("kernel32.dll", "CreateFile2": extern "system" fn(*const u16, u32, u32, u32, *const c_void) -> Handle)(
-        p.ptr(),
-        access,
-        share,
-        disposition,
-        params,
-    )
+    let handle = host!("kernel32.dll", "CreateFile2": extern "system" fn(*const u16, u32, u32, u32, *const c_void) -> Handle)(
+        p.ptr(), access, share, disposition, params,
+    );
+    remember_file_path(handle, title_path);
+    handle
 }
 
 pub extern "system" fn DeleteFileA(path: *const c_char) -> i32 {
