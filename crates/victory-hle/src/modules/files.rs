@@ -983,6 +983,19 @@ mod tests {
     }
 
     #[test]
+    fn overlapped_file_offset_combines_high_and_low_words() {
+        let mut overlapped = FileOverlapped {
+            internal: 0,
+            internal_high: 0,
+            offset: 0x89ab_cdef,
+            offset_high: 0x1234_5678,
+            event: std::ptr::null_mut(),
+        };
+        let offset = overlapped_file_offset((&mut overlapped as *mut FileOverlapped).cast());
+        assert_eq!(offset, Some(0x1234_5678_89ab_cdef));
+    }
+
+    #[test]
     fn kernel_reads_reach_the_buffer() {
         use std::os::windows::io::AsRawHandle;
         let dir = tempfile::tempdir().unwrap();
