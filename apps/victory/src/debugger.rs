@@ -1158,10 +1158,10 @@ mod tests {
 
         assert_eq!(target.to_ida_address(process_address), ida_address);
         assert_eq!(target.to_process_address(ida_address), Ok(process_address));
-        assert_eq!(
-            target.to_ida_boundary(target.image_base + target.image_size),
-            target.ida_base + target.image_size as u64
-        );
+        let image_end = target.image_base + target.image_size;
+        let ida_image_end = target.ida_base + target.image_size as u64;
+        assert_eq!(target.to_ida_boundary(image_end), ida_image_end);
+        assert_eq!(target.to_process_address(ida_image_end), Ok(image_end));
 
         let external_address = 0x00007ff700001000usize;
         assert_eq!(target.to_ida_address(external_address), external_address as u64);
