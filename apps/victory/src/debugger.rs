@@ -212,10 +212,19 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
 
     // The title has not been launched yet, so this breakpoint is guaranteed
     // to be in place before the entry thread can execute its first instruction.
+    let ida_entry_address = runtime.target.to_ida_address(entry_address);
     add_breakpoint(&runtime, entry_address)
         .map_err(anyhow::Error::msg)
-        .with_context(|| format!("installing entry-point breakpoint at {entry_address:#x}"))?;
-    tracing::info!(entry = %format!("{entry_address:#x}"), "automatic entry-point breakpoint installed");
+        .with_context(|| {
+            format!(
+                "installing entry-point breakpoint at IDA {ida_entry_address:#x} (runtime {entry_address:#x})"
+            )
+        })?;
+    tracing::info!(
+        entry = %format!("{ida_entry_address:#x}"),
+        runtime = %format!("{entry_address:#x}"),
+        "automatic entry-point breakpoint installed"
+    );
 
     Ok(format!("http://127.0.0.1:{}", address.port()))
 }
@@ -808,7 +817,10 @@ fn add_breakpoint(runtime: &Runtime, address: usize) -> Result<(), String> {
         return Ok(());
     }
     if !is_executable(address) {
-        return Err(format!("{address:#x} is not committed executable memory"));
+        return Err(format!(
+            "IDA/native address {:#x} (runtime {address:#x}) is not committed executable memory",
+            runtime.target.to_ida_address(address)
+        ));
     }
 
     let was_paused = runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused;
@@ -818,7 +830,10 @@ fn add_breakpoint(runtime: &Runtime, address: usize) -> Result<(), String> {
     let result = (|| {
         let original = byte_at(address)?;
         if original == 0xCC {
-            return Err(format!("{address:#x} already contains an INT3 instruction"));
+            return Err(format!(
+                "IDA/native address {:#x} (runtime {address:#x}) already contains an INT3 instruction",
+                runtime.target.to_ida_address(address)
+            ));
         }
         // SAFETY: address was checked as executable and all other process threads were suspended.
         unsafe { write_code_byte(address, 0xCC) }?;
