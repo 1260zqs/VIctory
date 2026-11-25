@@ -509,7 +509,6 @@ async function loadDisassembly(address=null,append=false,direction="after"){
     }
   }catch(error){
     if(requestId===disasmRequestId){
-      disasmHasMore=false;
       if(append){
         if(direction==="before")disasmHasPrevious=false;
         else disasmHasMore=false;
