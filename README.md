@@ -187,6 +187,11 @@ thread stacks, retain their native virtual addresses.
 The loopback HTTP API also exposes:
 - `GET /api/stack?thread=ID` — unwind the selected thread while paused; frames
   include IDA/native addresses and a module-relative location.
+- `GET /api/disassemble?address=0x...&count=64` — decode up to 128 x64
+  instructions from a paused process using Intel syntax. Title addresses and
+  RIP-relative operands are formatted in IDA address space. The dashboard
+  follows the active stop automatically and switches disassembly when a stack
+  frame is selected.
 - `GET /api/wait?timeout_ms=30000` — wait for the next paused stop instead of
   polling status.
 - `POST /api/runto?address=0x...` — arm a temporary breakpoint and resume
@@ -212,7 +217,13 @@ HLE boundaries for Win32 `ReadFile`/`WriteFile`, CRT `fread`/`fwrite`
 and `_read`/`_write`, plus DirectStorage request enqueue. The DirectStorage
 stack is the game thread that submits the request, not the worker that later
 performs the queued read. The event history records requested operations; it
-does not claim that the underlying I/O later succeeded.
+does not claim that the underlying I/O later succeeded. File offsets are
+captured from the `OVERLAPPED` structure for overlapped Win32 I/O, from the
+current file pointer for synchronous `ReadFile`/`WriteFile`, and from the CRT
+stream/descriptor cursor for `fread`/`fwrite` and `_read`/`_write`. The
+offset is best-effort when a handle is not seekable; concurrent synchronous
+operations sharing one file pointer can move that pointer between the query
+and the actual call. DirectStorage reports the request's explicit file offset.
 
 These are API-boundary breakpoints, **not** x64 hardware data breakpoints
 (DR0–DR3). They are intended to answer "which game function asked the runtime
