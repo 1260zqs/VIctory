@@ -1289,26 +1289,27 @@ fn decode_instructions(
     bytes: &[u8],
     count: usize,
 ) -> Vec<Value> {
-    let mut decoder = Decoder::with_ip(64, bytes, runtime_start as u64, DecoderOptions::NONE);
+    // Decode in IDA address space. iced derives relative branch targets and
+    // RIP-relative operands from the instruction pointer, so decoding there
+    // (instead of rewriting the IP afterwards, which leaves the cached target
+    // alone) keeps both in the space the debugger UI shows.
+    let ida_start = target.to_ida_address(runtime_start);
+    let mut decoder = Decoder::with_ip(64, bytes, ida_start, DecoderOptions::NONE);
     let mut formatter = IntelFormatter::new();
     let mut instructions = Vec::with_capacity(count);
 
     while decoder.can_decode() && instructions.len() < count {
         let instruction = decoder.decode();
-        let runtime_address = instruction.ip() as usize;
-        let ida_address = target.to_ida_address(runtime_address);
+        let ida_address = instruction.ip();
+        let offset = ida_address.saturating_sub(ida_start) as usize;
+        let runtime_address = runtime_start.saturating_add(offset);
         let length = instruction.len() as usize;
         let invalid = instruction.is_invalid();
-        let start = runtime_address.saturating_sub(runtime_start);
-        let end = start.saturating_add(length).min(bytes.len());
-        let raw = bytes.get(start..end).unwrap_or_default();
+        let end = offset.saturating_add(length).min(bytes.len());
+        let raw = bytes.get(offset..end).unwrap_or_default();
 
-        // Format with the IDA-space IP so RIP-relative operands and branch
-        // destinations stay in the same address space as the debugger UI.
-        let mut display_instruction = instruction;
-        display_instruction.set_ip(ida_address);
         let mut text = String::new();
-        formatter.format(&display_instruction, &mut text);
+        formatter.format(&instruction, &mut text);
         if invalid {
             text = "invalid instruction".to_owned();
         }
@@ -1327,18 +1328,47 @@ fn decode_instructions(
 }
 
 
-fn disassembly_before_json(runtime: &Runtime, address: u64, count: usize) -> Result<Value, String> {
-    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
-        return Err("disassembly requires a paused process".into());
+/// Decode the `count` instructions that end at `process_end`.
+///
+/// x86 has no backward disassembler, so find an alignment first: decode from
+/// each of the 16 possible start offsets and keep the chain that lands exactly
+/// on `process_end` with the fewest invalid instructions. Decoding up to a
+/// stop or stack-frame address then lines up with real instruction boundaries
+/// instead of stepping backwards one questionable instruction at a time.
+fn decode_before_window(
+    target: &DebugTarget,
+    process_end: usize,
+    count: usize,
+) -> Option<(Vec<Value>, usize)> {
+    // SAFETY: zeroed is a valid output buffer for MEMORY_BASIC_INFORMATION.
+    let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: VirtualQuery writes into the correctly sized structure.
+    let queried = unsafe {
+        VirtualQuery(
+            process_end as *const c_void,
+            &mut info,
+            size_of::<MEMORY_BASIC_INFORMATION>(),
+        )
+    };
+    if queried == 0 {
+        return None;
+    }
+    // Stay inside the region holding the address: title code, a host DLL or a
+    // stack all decode without reading across a boundary into other data.
+    let region_start = info.BaseAddress as usize;
+    let span = count
+        .saturating_mul(15)
+        .saturating_add(64)
+        .min(MAX_MEMORY_READ);
+    let process_start = process_end.saturating_sub(span).max(region_start);
+    let available = process_end.checked_sub(process_start)?;
+    if available == 0 {
+        return None;
     }
 
-    let process_end = runtime.target.to_process_address(address)?;
-    let count = count.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
-    let requested = count.saturating_mul(15).min(MAX_MEMORY_READ);
-    let process_start = process_end.saturating_sub(requested).max(runtime.target.image_base);
-    let available = process_end.saturating_sub(process_start);
     let mut bytes = vec![0u8; available];
     let mut read = 0usize;
+    // SAFETY: ReadProcessMemory validates the range in this process.
     let ok = unsafe {
         ReadProcessMemory(
             GetCurrentProcess(),
@@ -1349,37 +1379,74 @@ fn disassembly_before_json(runtime: &Runtime, address: u64, count: usize) -> Res
         )
     } != 0;
     if !ok || read == 0 {
-        return Err(format!("could not read code before {process_end:#x}: {}", std::io::Error::last_os_error()));
+        return None;
     }
     bytes.truncate(read);
-    let mut end = bytes.len();
-    let mut reversed = Vec::with_capacity(count);
-    while end > 0 && reversed.len() < count {
-        let mut found = None;
-        let max_len = end.min(15);
-        for length in (1..=max_len).rev() {
-            let start = end - length;
-            let mut decoder = Decoder::with_ip(64, &bytes[start..end], (process_start + start) as u64, DecoderOptions::NONE);
+
+    let mut best: Option<(bool, usize, usize)> = None; // (ends invalid, invalid count, offset)
+    for offset in 0..bytes.len().min(16) {
+        let slice = &bytes[offset..];
+        let mut decoder =
+            Decoder::with_ip(64, slice, (process_start + offset) as u64, DecoderOptions::NONE);
+        let mut invalid = 0usize;
+        let mut last = None;
+        let mut last_invalid = true;
+        while decoder.can_decode() {
             let instruction = decoder.decode();
-            if !instruction.is_invalid() && decoder.position() == length {
-                found = Some(start);
-                break;
+            if instruction.is_invalid() {
+                invalid += 1;
             }
+            last = Some(instruction.next_ip());
+            last_invalid = instruction.is_invalid();
         }
-        let Some(start) = found else { break };
-        let mut decoded = decode_instructions(&runtime.target, process_start + start, &bytes[start..end], 1);
-        if let Some(instruction) = decoded.pop() {
-            reversed.push(instruction);
+        if last != Some(process_end as u64) {
+            continue;
         }
-        end = start;
+        // A chain that ends on a whole instruction is the real alignment;
+        // prefer that over one that merely has fewer bad decodes.
+        if best.is_none_or(|(best_ends_invalid, best_invalid, _)| {
+            (last_invalid, invalid) < (best_ends_invalid, best_invalid)
+        }) {
+            best = Some((last_invalid, invalid, offset));
+        }
     }
-    reversed.reverse();
+    let (_, _, offset) = best?;
+
+    let slice = &bytes[offset..];
+    let mut instructions = decode_instructions(target, process_start + offset, slice, slice.len());
+    // Trailing bad decodes mean the address is not an instruction boundary:
+    // drop them so the window above the address still reads as real code.
+    while instructions
+        .last()
+        .and_then(|row| row["invalid"].as_bool())
+        .unwrap_or(false)
+    {
+        instructions.pop();
+    }
+    let first = instructions.len().saturating_sub(count);
+    Some((instructions[first..].to_vec(), read))
+}
+
+fn disassembly_before_json(runtime: &Runtime, address: u64, count: usize) -> Result<Value, String> {
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("disassembly requires a paused process".into());
+    }
+
+    let process_end = runtime.target.to_process_address(address)?;
+    let count = count.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+    let Some((instructions, bytes_read)) = decode_before_window(&runtime.target, process_end, count)
+    else {
+        return Err(format!(
+            "could not decode code before {:#x}",
+            runtime.target.to_ida_address(process_end)
+        ));
+    };
     Ok(json!({
-        "address": format!("{:#x}", runtime.target.to_ida_address(process_start + end)),
-        "runtime_address": format!("{:#x}", process_start + end),
-        "bytes_read": read,
-        "instruction_count": reversed.len(),
-        "instructions": reversed,
+        "address": format!("{:#x}", runtime.target.to_ida_address(process_end)),
+        "runtime_address": format!("{process_end:#x}"),
+        "bytes_read": bytes_read,
+        "instruction_count": instructions.len(),
+        "instructions": instructions,
     }))
 }
 
@@ -1417,6 +1484,64 @@ fn disassembly_json(runtime: &Runtime, address: u64, count: usize) -> Result<Val
         "address": format!("{:#x}", runtime.target.to_ida_address(process_address)),
         "runtime_address": format!("{process_address:#x}"),
         "bytes_read": bytes.len(),
+        "instruction_count": instructions.len(),
+        "instructions": instructions,
+    }))
+}
+
+/// Decode a window around `address`: `context` instructions before it and
+/// `context` more from it on. The UI asks for this so "Go" lands with context
+/// above and below, and `center_index` names the instruction at the address.
+fn disassembly_window_json(runtime: &Runtime, address: u64, context: usize) -> Result<Value, String> {
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("disassembly requires a paused process".into());
+    }
+
+    let process_address = runtime.target.to_process_address(address)?;
+    let context = context.clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+
+    // Code at the start of a readable range has nothing before it, code at the
+    // end has nothing after it: either side may be missing and the other half
+    // still shows.
+    let before = disassembly_before_json(runtime, address, context).ok();
+    let after = disassembly_json(runtime, address, context.saturating_add(1)).ok();
+
+    let mut instructions: Vec<Value> = Vec::new();
+    let mut before_count = 0usize;
+    let mut bytes_read = 0usize;
+    if let Some(value) = &before {
+        if let Some(rows) = value["instructions"].as_array() {
+            before_count = rows.len();
+            instructions.extend(rows.iter().cloned());
+        }
+        bytes_read += value["bytes_read"].as_u64().unwrap_or(0) as usize;
+    }
+    if let Some(value) = &after {
+        if let Some(rows) = value["instructions"].as_array() {
+            instructions.extend(rows.iter().cloned());
+        }
+        bytes_read += value["bytes_read"].as_u64().unwrap_or(0) as usize;
+    }
+    if instructions.is_empty() {
+        return Err(format!(
+            "no instructions could be decoded around {:#x}",
+            runtime.target.to_ida_address(process_address)
+        ));
+    }
+
+    let requested = format!("{:#x}", runtime.target.to_ida_address(process_address));
+    let center = instructions
+        .iter()
+        .position(|row| row["address"].as_str() == Some(requested.as_str()))
+        .unwrap_or_else(|| before_count.min(instructions.len() - 1));
+
+    Ok(json!({
+        "address": requested,
+        "runtime_address": format!("{process_address:#x}"),
+        "center_index": center,
+        "before_count": before_count,
+        "after_count": instructions.len() - before_count,
+        "bytes_read": bytes_read,
         "instruction_count": instructions.len(),
         "instructions": instructions,
     }))
@@ -2021,11 +2146,22 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
-            let count = query_value(query, "count")
+            // `context=N` decodes N instructions on either side of the address;
+            // `count=N` keeps the older "decode forward from here" shape.
+            let context = query_value(query, "context")
                 .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(64)
-                .clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
-            match disassembly_json(runtime, address as u64, count) {
+                .filter(|value| *value > 0);
+            let result = match context {
+                Some(context) => disassembly_window_json(runtime, address as u64, context),
+                None => {
+                    let count = query_value(query, "count")
+                        .and_then(|value| value.parse::<usize>().ok())
+                        .unwrap_or(64)
+                        .clamp(1, MAX_DISASSEMBLY_INSTRUCTIONS);
+                    disassembly_json(runtime, address as u64, count)
+                }
+            };
+            match result {
                 Ok(value) => (200, value),
                 Err(error) if error == "disassembly requires a paused process" => {
                     (409, json!({"error": error}))

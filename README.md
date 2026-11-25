@@ -187,11 +187,13 @@ thread stacks, retain their native virtual addresses.
 The loopback HTTP API also exposes:
 - `GET /api/stack?thread=ID` — unwind the selected thread while paused; frames
   include IDA/native addresses and a module-relative location.
-- `GET /api/disassemble?address=0x...&count=64` — decode up to 128 x64
+- `GET /api/disassemble?address=0x...&count=64` (forward from the address) or
+  `&context=100` (a window of 100 instructions on either side of it, with
+  `center_index` naming the instruction at that address) — decode up to 128 x64
   instructions from a paused process using Intel syntax. Title addresses and
   RIP-relative operands are formatted in IDA address space. The dashboard
-  follows the active stop automatically and switches disassembly when a stack
-  frame is selected.
+  follows the active stop automatically, scrolls the address to the middle of
+  the panel and switches disassembly when a stack frame is selected.
 - `GET /api/wait?timeout_ms=30000` — wait for the next paused stop instead of
   polling status.
 - `POST /api/runto?address=0x...` — arm a temporary breakpoint and resume

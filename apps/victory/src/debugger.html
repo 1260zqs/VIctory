@@ -276,6 +276,8 @@ tbody tr{cursor:pointer}
 
 <script>
 const $=id=>document.getElementById(id);
+// Disassembly context: instructions decoded on each side of the address.
+const DISASM_CONTEXT=100;
 let latestStatus=null,selectedTid=null,latestThreads=[],selectedRegisters=null;
 let regionCursor="0x0",lastStopKey="",lastStack=[],selectedFrameAddress=null;
 let waitLoopRunning=false;
@@ -431,13 +433,14 @@ async function loadDisassembly(address=null){
   $("asmAddress").value=value;
   $("asmState").textContent="DECODING";
   try{
-    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&count=64");
+    const data=await api("/api/disassemble?address="+encodeURIComponent(value)+"&context="+DISASM_CONTEXT);
     const rows=data.instructions||[];
-    $("asmInfo").textContent=data.address+" · runtime "+data.runtime_address+" · "+data.instruction_count+" instructions / "+data.bytes_read+" bytes";
+    const center=Number.isInteger(data.center_index)?data.center_index:0;
+    $("asmInfo").textContent=data.address+" · runtime "+data.runtime_address+" · "+data.instruction_count+" instructions ("+data.before_count+" before / "+data.after_count+" after) / "+data.bytes_read+" bytes";
     $("asmInfo").className="hint";
     $("asmState").textContent="X64 / INTEL";
     $("disassembly").innerHTML=rows.map((instruction,index)=>
-      '<tr class="'+(index===0?"asm-current":"")+'" data-asm-address="'+esc(instruction.address)+'">'+
+      '<tr class="'+(index===center?"asm-current":"")+'" data-asm-address="'+esc(instruction.address)+'">'+
       '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
       '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>'
     ).join("")||'<tr><td colspan="3" class="empty">No instructions decoded.</td></tr>';
@@ -446,7 +449,7 @@ async function loadDisassembly(address=null){
       loadDisassembly(button.dataset.address);
     }));
     const current=$("disassembly").querySelector(".asm-current");
-    if(current)current.scrollIntoView({block:"nearest"});
+    if(current)current.scrollIntoView({block:"center"});
   }catch(error){
     $("asmState").textContent="UNAVAILABLE";
     $("asmInfo").textContent=error.message;
