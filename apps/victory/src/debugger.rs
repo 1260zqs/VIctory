@@ -45,9 +45,53 @@ pub struct DebugTarget {
     pub title: String,
     pub build_hash: String,
     pub image_base: usize,
-    pub preferred_base: u64,
+    pub ida_base: u64,
     pub image_size: usize,
     pub entry_rva: u32,
+}
+
+impl DebugTarget {
+    fn to_ida_address(&self, address: usize) -> u64 {
+        let Some(offset) = address.checked_sub(self.image_base) else {
+            return address as u64;
+        };
+        if offset < self.image_size {
+            self.ida_base.saturating_add(offset as u64)
+        } else {
+            address as u64
+        }
+    }
+
+    fn to_ida_boundary(&self, address: usize) -> u64 {
+        let Some(offset) = address.checked_sub(self.image_base) else {
+            return address as u64;
+        };
+        if offset <= self.image_size {
+            self.ida_base.saturating_add(offset as u64)
+        } else {
+            address as u64
+        }
+    }
+
+    fn to_process_address(&self, address: u64) -> Result<usize, String> {
+        if let Some(offset) = address.checked_sub(self.ida_base) {
+            if offset <= self.image_size as u64 {
+                let offset = usize::try_from(offset)
+                    .map_err(|_| format!("IDA address {address:#x} is out of range"))?;
+                return self
+                    .image_base
+                    .checked_add(offset)
+                    .ok_or_else(|| format!("IDA address {address:#x} overflows the process address space"));
+            }
+        }
+
+        usize::try_from(address)
+            .map_err(|_| format!("address {address:#x} is out of range"))
+    }
+
+    fn rebase_delta(&self) -> i128 {
+        self.ida_base as i128 - self.image_base as i128
+    }
 }
 
 struct Runtime {
@@ -339,25 +383,28 @@ impl Registers {
         }
     }
 
-    fn json(self) -> Value {
+    fn json(self, target: &DebugTarget) -> Value {
+        let address = |value: u64| {
+            format!("{:#018x}", target.to_ida_address(value as usize))
+        };
         json!({
-            "rax": format!("{:#018x}", self.rax),
-            "rbx": format!("{:#018x}", self.rbx),
-            "rcx": format!("{:#018x}", self.rcx),
-            "rdx": format!("{:#018x}", self.rdx),
-            "rsi": format!("{:#018x}", self.rsi),
-            "rdi": format!("{:#018x}", self.rdi),
-            "rbp": format!("{:#018x}", self.rbp),
-            "rsp": format!("{:#018x}", self.rsp),
-            "rip": format!("{:#018x}", self.rip),
-            "r8": format!("{:#018x}", self.r8),
-            "r9": format!("{:#018x}", self.r9),
-            "r10": format!("{:#018x}", self.r10),
-            "r11": format!("{:#018x}", self.r11),
-            "r12": format!("{:#018x}", self.r12),
-            "r13": format!("{:#018x}", self.r13),
-            "r14": format!("{:#018x}", self.r14),
-            "r15": format!("{:#018x}", self.r15),
+            "rax": address(self.rax),
+            "rbx": address(self.rbx),
+            "rcx": address(self.rcx),
+            "rdx": address(self.rdx),
+            "rsi": address(self.rsi),
+            "rdi": address(self.rdi),
+            "rbp": address(self.rbp),
+            "rsp": address(self.rsp),
+            "rip": address(self.rip),
+            "r8": address(self.r8),
+            "r9": address(self.r9),
+            "r10": address(self.r10),
+            "r11": address(self.r11),
+            "r12": address(self.r12),
+            "r13": address(self.r13),
+            "r14": address(self.r14),
+            "r15": address(self.r15),
             "rflags": format!("{:#010x}", self.rflags),
         })
     }
@@ -533,7 +580,7 @@ fn registers_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
         .ok_or_else(|| format!("thread {thread_id} exited or its context is unavailable"))?;
     Ok(json!({
         "thread_id": thread_id,
-        "registers": registers.json(),
+        "registers": registers.json(&runtime.target),
     }))
 }
 
@@ -546,18 +593,34 @@ fn status_json(runtime: &Runtime) -> Value {
         "pid": pid,
         "title": runtime.target.title,
         "build_hash": runtime.target.build_hash,
-        "base": format!("{:#x}", runtime.target.image_base),
-        "preferred_base": format!("{:#x}", runtime.target.preferred_base),
+        "runtime_base": format!("{:#x}", runtime.target.image_base),
+        "ida_base": format!("{:#x}", runtime.target.ida_base),
+        "rebase_delta": format_signed_hex(runtime.target.rebase_delta()),
         "image_size": format!("{:#x}", runtime.target.image_size),
         "entry_rva": format!("{:#x}", runtime.target.entry_rva),
-        "entry_runtime": format!("{:#x}", runtime.target.image_base + runtime.target.entry_rva as usize),
+        "entry_address": format!(
+            "{:#x}",
+            runtime.target.to_ida_address(
+                runtime.target.image_base + runtime.target.entry_rva as usize
+            )
+        ),
         "state": if control.paused { "paused" } else { "running" },
         "reason": control.reason,
-        "hit_address": control.hit_address.map(|v| format!("{v:#x}")),
+        "hit_address": control
+            .hit_address
+            .map(|v| format!("{:#x}", runtime.target.to_ida_address(v))),
         "hit_thread": control.hit_thread,
         "breakpoint_count": breakpoints.len(),
         "uptime_seconds": runtime.started.elapsed().as_secs(),
     })
+}
+
+fn format_signed_hex(value: i128) -> String {
+    if value < 0 {
+        format!("-{:#x}", value.unsigned_abs())
+    } else {
+        format!("+{:#x}", value as u128)
+    }
 }
 
 fn protection_name(protect: u32) -> &'static str {
@@ -574,7 +637,7 @@ fn protection_name(protect: u32) -> &'static str {
     }
 }
 
-fn regions_json(cursor: usize, limit: usize) -> Value {
+fn regions_json(runtime: &Runtime, cursor: usize, limit: usize) -> Value {
     let mut address = cursor;
     let mut rows = Vec::new();
     let mut done = false;
@@ -608,10 +671,13 @@ fn regions_json(cursor: usize, limit: usize) -> Value {
                 _ => "UNKNOWN",
             };
             rows.push(json!({
-                "base": format!("{base:#x}"),
-                "end": format!("{end:#x}"),
+                "base": format!("{:#x}", runtime.target.to_ida_address(base)),
+                "end": format!("{:#x}", runtime.target.to_ida_boundary(end)),
                 "size": format!("{:#x}", info.RegionSize),
-                "allocation_base": format!("{:#x}", info.AllocationBase as usize),
+                "allocation_base": format!(
+                    "{:#x}",
+                    runtime.target.to_ida_address(info.AllocationBase as usize)
+                ),
                 "state": state,
                 "type": kind,
                 "protect": protection_name(info.Protect),
@@ -626,12 +692,12 @@ fn regions_json(cursor: usize, limit: usize) -> Value {
     }
     json!({
         "regions": rows,
-        "next": format!("{address:#x}"),
+        "next": format!("{:#x}", runtime.target.to_ida_boundary(address)),
         "done": done,
     })
 }
 
-fn memory_json(address: usize, requested: usize) -> Value {
+fn memory_json(runtime: &Runtime, address: usize, requested: usize) -> Value {
     let length = requested.clamp(1, MAX_MEMORY_READ);
     let mut bytes = vec![0u8; length];
     let mut read = 0usize;
@@ -657,7 +723,7 @@ fn memory_json(address: usize, requested: usize) -> Value {
         })
         .collect();
     json!({
-        "address": format!("{address:#x}"),
+        "address": format!("{:#x}", runtime.target.to_ida_address(address)),
         "requested": length,
         "read": bytes.len(),
         "ok": ok || !bytes.is_empty(),
@@ -673,7 +739,7 @@ fn breakpoints_json(runtime: &Runtime) -> Value {
             .iter()
             .map(|(address, original)| {
                 json!({
-                    "address": format!("{address:#x}"),
+                    "address": format!("{:#x}", runtime.target.to_ida_address(*address)),
                     "original_byte": format!("{original:02X}"),
                     "enabled": true,
                 })
@@ -945,21 +1011,35 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
         }
         ("GET", "/api/regions") => {
             let cursor = parse_address(query_value(query, "cursor"), 0).unwrap_or(0);
+            let cursor = match runtime.target.to_process_address(cursor as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
+            };
             let limit = query_value(query, "limit")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(250)
                 .clamp(1, 500);
-            (200, regions_json(cursor, limit))
+            (200, regions_json(runtime, cursor, limit))
         }
         ("GET", "/api/memory") => {
             let Some(address) = parse_address(query_value(query, "address"), 0) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
+            let address = match runtime.target.to_process_address(address as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
+            };
             let length = query_value(query, "length")
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(0x100);
-            (200, memory_json(address, length))
+            (200, memory_json(runtime, address, length))
         }
         ("GET", "/api/breakpoints") => (200, breakpoints_json(runtime)),
         ("POST", "/api/pause") => {
@@ -979,6 +1059,13 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
             };
+            let address = match runtime.target.to_process_address(address as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
+            };
             match add_breakpoint(runtime, address) {
                 Ok(()) => (200, breakpoints_json(runtime)),
                 Err(error) => (400, json!({"error": error})),
@@ -988,6 +1075,13 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
             let Some(address) = parse_address(query_value(query, "address"), 0) else {
                 respond(&mut stream, 400, "application/json", r#"{"error":"invalid address"}"#);
                 return;
+            };
+            let address = match runtime.target.to_process_address(address as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
             };
             match remove_breakpoint(runtime, address) {
                 Ok(()) => (200, breakpoints_json(runtime)),
@@ -1031,6 +1125,35 @@ mod tests {
         assert_eq!(parse_address(Some("0x7ff900001000".into()), 0), Some(0x7ff900001000));
         assert_eq!(parse_address(Some("7FF900001000".into()), 0), Some(0x7ff900001000));
         assert_eq!(parse_address(Some("invalid".into()), 0), None);
+    }
+
+    #[test]
+    fn title_addresses_translate_to_and_from_ida_space() {
+        let target = DebugTarget {
+            title: "test".into(),
+            build_hash: "test".into(),
+            image_base: 0x00007ff600000000,
+            ida_base: 0x140000000,
+            image_size: 0x300000,
+            entry_rva: 0x1000,
+        };
+
+        let process_address = target.image_base + 0x1234;
+        let ida_address = 0x140001234;
+
+        assert_eq!(target.to_ida_address(process_address), ida_address);
+        assert_eq!(target.to_process_address(ida_address), Ok(process_address));
+        assert_eq!(
+            target.to_ida_boundary(target.image_base + target.image_size),
+            target.ida_base + target.image_size as u64
+        );
+
+        let external_address = 0x00007ff700001000usize;
+        assert_eq!(target.to_ida_address(external_address), external_address as u64);
+        assert_eq!(
+            target.to_process_address(external_address as u64),
+            Ok(external_address)
+        );
     }
 
     #[test]
