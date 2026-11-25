@@ -787,14 +787,15 @@ fn set_register(runtime: &Runtime, thread_id: u32, name: &str, value: u64) -> Re
         .pending_context
         .or(control.hit_context)
         .ok_or_else(|| "the active stop has no saved exception context".to_owned())?;
-    set_context_register(&mut context, name, value)?;
+    let process_value = runtime.target.to_process_address(value)?;
+    set_context_register(&mut context, name, process_value as u64)?;
     control.hit_context = Some(context);
     control.pending_context = Some(context);
     control.hit_registers = Some(Registers::from(&context));
     Ok(json!({
         "thread_id": thread_id,
         "register": name.to_ascii_uppercase(),
-        "value": format!("{value:#x}"),
+        "value": format!("{:#x}", runtime.target.to_ida_address(process_value)),
         "registers": Registers::from(&context).json(&runtime.target),
     }))
 }
