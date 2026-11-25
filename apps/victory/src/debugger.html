@@ -97,7 +97,7 @@ table{width:100%;border-collapse:collapse;font:12px/1.4 Consolas,monospace}th{te
 </main>
 <script>
 const $=id=>document.getElementById(id);
-let latestStatus=null, selectedTid=null, latestThreads=[];
+let latestStatus=null, selectedTid=null, latestThreads=[], selectedRegisters=null;
 let regionCursor="0x0";
 const esc=value=>String(value??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function api(path,method="GET"){
@@ -137,15 +137,14 @@ function renderThreads(threads){
   if(selectedTid===null&&threads.length)selectedTid=threads[0].id;
   if(!threads.some(t=>t.id===selectedTid)&&threads.length)selectedTid=threads[0].id;
   $("threads").innerHTML=threads.map(t=>{
-    const regs=t.registers;
-    return '<tr data-tid="'+t.id+'" class="'+(t.id===selectedTid?'selected':'')+'"><td>'+t.id+'</td><td class="thread-name">'+esc(t.name||"(unnamed)")+'</td><td>'+(regs?esc(regs.rip):"—")+'</td></tr>';
+    return '<tr data-tid="'+t.id+'" class="'+(t.id===selectedTid?'selected':'')+'"><td>'+t.id+'</td><td class="thread-name">'+esc(t.name||"(unnamed)")+'</td><td>'+(t.id===selectedTid&&selectedRegisters?esc(selectedRegisters.rip):"—")+'</td></tr>';
   }).join("")||'<tr><td colspan="3" class="empty">No inspectable threads.</td></tr>';
   $("threads").querySelectorAll("tr[data-tid]").forEach(row=>row.addEventListener("click",()=>{
-    selectedTid=Number(row.dataset.tid);renderThreads(latestThreads);
+    selectedTid=Number(row.dataset.tid);selectedRegisters=null;renderThreads(latestThreads);refreshRegisters();
   }));
   const selected=threads.find(t=>t.id===selectedTid);
   $("selectedThread").textContent=selected?"TID "+selected.id:"No thread selected";
-  renderRegisters(selected&&selected.registers);
+  renderRegisters(selectedRegisters);
 }
 function renderBreakpoints(rows){
   $("breakpoints").innerHTML=rows.map(bp=>'<tr><td>'+esc(bp.address)+'</td><td><span class="tag">'+esc(bp.original_byte)+'</span></td><td><button class="danger" data-remove="'+esc(bp.address)+'">Remove</button></td></tr>').join("")||'<tr><td colspan="3" class="empty">No breakpoints set.</td></tr>';
@@ -155,7 +154,20 @@ function renderBreakpoints(rows){
   }));
 }
 async function refreshStatus(){try{renderStatus(await api("/api/status"));}catch(error){$("stateText").textContent=error.message;}}
-async function refreshThreads(){try{renderThreads(await api("/api/threads"));}catch(error){$("threadCount").textContent=error.message;}}
+async function refreshThreads(){try{renderThreads(await api("/api/threads"));await refreshRegisters();}catch(error){$("threadCount").textContent=error.message;}}
+async function refreshRegisters(){
+  if(selectedTid===null){selectedRegisters=null;renderRegisters(null);return;}
+  try{
+    const data=await api("/api/registers?thread="+selectedTid);
+    selectedRegisters=data.registers;
+    renderRegisters(selectedRegisters);
+    renderThreads(latestThreads);
+  }catch(error){
+    selectedRegisters=null;
+    renderRegisters(null);
+    renderThreads(latestThreads);
+  }
+}
 async function refreshBreakpoints(){try{renderBreakpoints(await api("/api/breakpoints"));}catch(error){showError(error);}}
 async function refreshAll(){await refreshStatus();await Promise.all([refreshThreads(),refreshBreakpoints()]);}
 function renderRegions(data,append){

@@ -489,28 +489,35 @@ fn thread_name(thread_id: u32) -> String {
 
 fn threads_json(runtime: &Runtime) -> Value {
     let server = runtime.server_thread.load(Ordering::Acquire);
-    let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
-    let hit_thread = control.hit_thread;
-    let hit_registers = control.hit_registers;
-    drop(control);
-
     let threads: Vec<Value> = process_thread_ids()
         .into_iter()
         .filter(|id| *id != server)
         .map(|id| {
-            let registers = if hit_thread == Some(id) {
-                hit_registers
-            } else {
-                read_context(id)
-            };
             json!({
                 "id": id,
                 "name": thread_name(id),
-                "registers": registers.map(Registers::json),
             })
         })
         .collect();
     Value::Array(threads)
+}
+
+fn registers_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
+    let control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    let hit_registers = if control.hit_thread == Some(thread_id) {
+        control.hit_registers
+    } else {
+        None
+    };
+    drop(control);
+
+    let registers = hit_registers
+        .or_else(|| read_context(thread_id))
+        .ok_or_else(|| format!("thread {thread_id} exited or its context is unavailable"))?;
+    Ok(json!({
+        "thread_id": thread_id,
+        "registers": registers.json(),
+    }))
 }
 
 fn status_json(runtime: &Runtime) -> Value {
@@ -727,6 +734,9 @@ fn add_breakpoint(runtime: &Runtime, address: usize) -> Result<(), String> {
     }
     let result = (|| {
         let original = byte_at(address)?;
+        if original == 0xCC {
+            return Err(format!("{address:#x} already contains an INT3 instruction"));
+        }
         // SAFETY: address was checked as executable and all other process threads were suspended.
         unsafe { write_code_byte(address, 0xCC) }?;
         runtime
@@ -904,6 +914,18 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
         }
         ("GET", "/api/status") => (200, status_json(runtime)),
         ("GET", "/api/threads") => (200, threads_json(runtime)),
+        ("GET", "/api/registers") => {
+            let Some(thread_id) = query_value(query, "thread")
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"invalid thread ID"}"#);
+                return;
+            };
+            match registers_json(runtime, thread_id) {
+                Ok(value) => (200, value),
+                Err(error) => (404, json!({"error": error})),
+            }
+        }
         ("GET", "/api/regions") => {
             let cursor = parse_address(query_value(query, "cursor"), 0).unwrap_or(0);
             let limit = query_value(query, "limit")
