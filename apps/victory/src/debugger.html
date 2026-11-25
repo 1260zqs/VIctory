@@ -257,7 +257,7 @@ tbody tr{cursor:pointer}
           </div>
         </div>
         <div class="panel-head"><span class="panel-title">Recent file activity</span><button id="refreshIo">Refresh</button></div>
-        <div class="scroll" style="max-height:270px"><table><thead><tr><th>Op</th><th>Path / API</th><th>Bytes</th></tr></thead><tbody id="ioEvents"><tr><td colspan="3" class="empty">No file events yet.</td></tr></tbody></table></div>
+        <div class="scroll" style="max-height:270px"><table><thead><tr><th>Op</th><th>Path / API</th><th>File offset</th><th>Bytes</th></tr></thead><tbody id="ioEvents"><tr><td colspan="4" class="empty">No file events yet.</td></tr></tbody></table></div>
       </div>
 
       <div class="panel">
@@ -488,8 +488,8 @@ async function refreshIoEvents(){
   try{
     const events=await api("/api/io/events");
     $("ioEvents").innerHTML=events.slice().reverse().map(event=>
-      '<tr class="io-event-row"><td class="'+(event.operation==="read"?"op-read":"op-write")+'">'+esc(event.operation.toUpperCase())+'</td><td><div>'+esc(event.path)+'</div><div class="hint">'+esc(event.api)+(event.offset?" · "+esc(event.offset):"")+'</div></td><td>'+Number(event.size).toLocaleString()+'</td></tr>'
-    ).join("")||'<tr><td colspan="3" class="empty">No file events yet.</td></tr>';
+      '<tr class="io-event-row"><td class="'+(event.operation==="read"?"op-read":"op-write")+'">'+esc(event.operation.toUpperCase())+'</td><td><div>'+esc(event.path)+'</div><div class="hint">'+esc(event.api)+'</div></td><td>'+(event.offset?esc(event.offset):"—")+'</td><td>'+Number(event.size).toLocaleString()+'</td></tr>'
+    ).join("")||'<tr><td colspan="4" class="empty">No file events yet.</td></tr>';
   }catch(error){$("ioEvents").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';}
 }
 async function refreshAll(){
