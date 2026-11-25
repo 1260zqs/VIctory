@@ -74,6 +74,8 @@ h1{font-size:clamp(20px,2vw,29px);line-height:1.1;margin:7px 0 5px;letter-spacin
 .panel-head{flex:0 0 auto}
 .panel-body{min-height:0}
 .panel>.scroll{flex:1 1 auto;min-height:0;max-height:none;overflow:auto}
+.layout>.col:first-child>.panel:nth-child(2)>.panel-body,
+.layout>.col:nth-child(2)>.panel:nth-child(3)>.panel-body{flex:1 1 auto;overflow:auto}
 .panel-head{min-height:43px;padding:10px 13px;border-bottom:1px solid #282e45;display:flex;justify-content:space-between;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,77,155,.055),rgba(83,239,255,.025))}
 .panel-title{display:flex;align-items:center;gap:9px;font-size:10px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}
 .panel-title:before{content:"";width:5px;height:14px;border-radius:4px;background:linear-gradient(var(--pink),var(--cyan));box-shadow:0 0 9px rgba(255,77,155,.35)}
@@ -436,34 +438,23 @@ async function refreshStack(){
     $("stackHeadline").textContent=error.message;
   }
 }
-function appendDisassemblyRows(rows){
-  const html=rows.map(instruction=>
-    '<tr data-asm-address="'+esc(instruction.address)+'">'+
-    '<td><button class="disasm-address" data-address="'+esc(instruction.address)+'">'+esc(instruction.address)+'</button></td>'+
-    '<td>'+esc(instruction.bytes)+'</td><td>'+esc(instruction.text)+'</td></tr>'
-  ).join("");
-  $("disassembly").insertAdjacentHTML("beforeend",html);
-  $("disassembly").querySelectorAll("button.disasm-address:not([data-bound])").forEach(button=>{
-    button.dataset.bound="1";
-    button.addEventListener("click",()=>{
-      $("asmAddress").value=button.dataset.address;
-      loadDisassembly(button.dataset.address);
-    });
-  });
-}
 async function loadDisassembly(address=null,append=false){
-  if(disasmLoading|| (append&&!disasmHasMore))return;
+  if(append&&(disasmLoading||!disasmHasMore))return;
   const scroll=$("disasmScroll");
   let value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
   if(append){
-    const previous=$("disassembly").querySelector("tr[data-asm-address]:last-of-type");
+    const previous=[...$("disassembly").querySelectorAll("tr[data-asm-address]")].at(-1);
     if(!previous)return;
     const last=JSON.parse(previous.dataset.instruction||"null");
     if(!last)return;
     value="0x"+(BigInt(last.address)+BigInt(last.length)).toString(16);
   }
   if(!value)return;
-  const requestId=append?disasmRequestId:++disasmRequestId;
+  if(!append){
+    ++disasmRequestId;
+    disasmLoading=false;
+  }
+  const requestId=disasmRequestId;
   disasmLoading=true;
   if(!append){
     disasmHasMore=true;
@@ -482,12 +473,9 @@ async function loadDisassembly(address=null,append=false){
     $("asmInfo").className="hint";
     $("asmState").textContent="X64 / INTEL";
     if(!append){
-      const first=rows[0];
       const spacerHeight=Math.max(0,Math.floor((scroll.clientHeight-24)/2));
       $("disassembly").innerHTML='<tr class="asm-anchor-spacer" aria-hidden="true" style="height:'+spacerHeight+'px"><td colspan="3"></td></tr>';
-      if(first)first.is_anchor=true;
     }
-    for(const instruction of rows)instruction.dataset=undefined;
     const html=rows.map((instruction,index)=>{
       const current=!append&&index===0;
       return '<tr '+(current?'class="asm-current" ':'')+'data-asm-address="'+esc(instruction.address)+'" data-instruction="'+esc(JSON.stringify(instruction))+'">'+
@@ -507,10 +495,16 @@ async function loadDisassembly(address=null,append=false){
   }catch(error){
     if(requestId===disasmRequestId){
       disasmHasMore=false;
-      $("asmState").textContent="UNAVAILABLE";
-      $("asmInfo").textContent=error.message;
-      $("asmInfo").className="error";
-      $("disassembly").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';
+      if(append){
+        $("asmState").textContent="END OF REGION";
+        $("asmInfo").textContent="No more readable code after the loaded instructions · "+error.message;
+        $("asmInfo").className="hint";
+      }else{
+        $("asmState").textContent="UNAVAILABLE";
+        $("asmInfo").textContent=error.message;
+        $("asmInfo").className="error";
+        $("disassembly").innerHTML='<tr><td colspan="3" class="empty">'+esc(error.message)+'</td></tr>';
+      }
     }
   }finally{
     if(requestId===disasmRequestId)disasmLoading=false;
