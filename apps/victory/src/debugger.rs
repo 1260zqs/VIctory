@@ -502,6 +502,73 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
     0 // EXCEPTION_CONTINUE_SEARCH
 }
 
+fn handle_native_exception(
+    runtime: &Runtime,
+    context: &mut CONTEXT,
+    record: &windows_sys::Win32::System::Diagnostics::Debug::EXCEPTION_RECORD,
+) -> i32 {
+    let code = record.ExceptionCode as u32;
+    let detail = if code == EXCEPTION_ACCESS_VIOLATION as u32 && record.NumberParameters >= 2 {
+        let operation = match record.ExceptionInformation[0] {
+            0 => "read",
+            1 => "write",
+            8 => "execute",
+            _ => "unknown access",
+        };
+        Some(format!("{operation} at {:#x}", record.ExceptionInformation[1]))
+    } else if code == EXCEPTION_ILLEGAL_INSTRUCTION as u32 {
+        Some("illegal instruction".to_owned())
+    } else {
+        None
+    };
+
+    // SAFETY: a plain query of the thread that raised this first-chance exception.
+    let thread_id = unsafe { GetCurrentThreadId() };
+    suspend_peers(runtime, &[thread_id]);
+
+    let mut control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    control.paused = true;
+    control.reason = "exception";
+    control.hit_address = Some(context.Rip as usize);
+    control.hit_thread = Some(thread_id);
+    control.hit_registers = Some(Registers::from(context));
+    control.hit_context = Some(*context);
+    control.pending_context = None;
+    control.exception_code = Some(code);
+    control.exception_detail = detail;
+    control.io_event = None;
+    control.step_thread = None;
+    control.step_breakpoint = None;
+    control.action = Action::Wait;
+    runtime.changed.notify_all();
+
+    while control.action == Action::Wait {
+        control = runtime.changed.wait(control).unwrap_or_else(|e| e.into_inner());
+    }
+
+    let patched_context = control.pending_context.take();
+    if let Some(patched) = patched_context {
+        *context = patched;
+    }
+    control.paused = false;
+    control.reason = "running";
+    control.hit_address = None;
+    control.hit_thread = None;
+    control.hit_registers = None;
+    control.hit_context = None;
+    control.exception_code = None;
+    control.exception_detail = None;
+    control.io_event = None;
+    control.action = Action::Wait;
+    runtime.changed.notify_all();
+    drop(control);
+    resume_peers(runtime);
+
+    // Without an explicit context edit, pass the exception on to later VEH/SEH
+    // handlers. With an edit, execute the modified context instead.
+    if patched_context.is_some() { -1 } else { 0 }
+}
+
 fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: usize) -> i32 {
     // A title-generated INT3 (for example __debugbreak()) is an inspectable
     // stop, not an unhandled exception. All other process breakpoints pass on.
