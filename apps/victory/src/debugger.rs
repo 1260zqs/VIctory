@@ -39,7 +39,6 @@ use windows_sys::Win32::System::Threading::{
 };
 
 const TRAP_FLAG: u32 = 0x100;
-const DEFAULT_WINMAIN_IDA_ADDRESS: u64 = 0x145A91BD0;
 const MAX_HTTP_HEADER: usize = 16 * 1024;
 const MAX_MEMORY_READ: usize = 0x1000;
 const MAX_DISASSEMBLY_INSTRUCTIONS: usize = 128;
@@ -96,14 +95,6 @@ impl DebugTarget {
     fn rebase_delta(&self) -> i128 {
         self.ida_base as i128 - self.image_base as i128
     }
-}
-
-fn default_winmain_address(target: &DebugTarget) -> Option<usize> {
-    let address = target
-        .to_process_address(DEFAULT_WINMAIN_IDA_ADDRESS)
-        .ok()?;
-    let offset = address.checked_sub(target.image_base)?;
-    (offset < target.image_size).then_some(address)
 }
 
 struct Runtime {
@@ -178,14 +169,33 @@ struct AlignedContext(CONTEXT);
 
 static RUNTIME: OnceLock<Arc<Runtime>> = OnceLock::new();
 
-pub fn start(port: u16, target: DebugTarget) -> Result<String> {
+fn parse_startup_breakpoint_address(value: &str) -> Result<u64> {
+    let value = value.trim();
+    let digits = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .unwrap_or(value);
+    anyhow::ensure!(!digits.is_empty(), "empty startup breakpoint address");
+    u64::from_str_radix(digits, 16)
+        .with_context(|| format!("invalid hexadecimal startup breakpoint address {value:?}"))
+}
+
+pub fn start(port: u16, target: DebugTarget, initial_breakpoints: &[String]) -> Result<String> {
+    let resolved_breakpoints = initial_breakpoints
+        .iter()
+        .map(|spec| {
+            let ida_or_native = parse_startup_breakpoint_address(spec)?;
+            let address = target
+                .to_process_address(ida_or_native)
+                .map_err(anyhow::Error::msg)
+                .with_context(|| format!("resolving startup breakpoint {spec:?}"))?;
+            Ok((spec.clone(), address))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let listener = TcpListener::bind(("127.0.0.1", port))
         .with_context(|| format!("binding debugger to 127.0.0.1:{port}"))?;
     let address = listener.local_addr()?;
-    let entry_address = target
-        .image_base
-        .checked_add(target.entry_rva as usize)
-        .context("title entry-point address overflow")?;
 
     let runtime = Arc::new(Runtime {
         target,
@@ -274,43 +284,22 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
         .recv()
         .context("waiting for the debugger HTTP thread to start")?;
 
-    // The title has not been launched yet, so this breakpoint is guaranteed
-    // to be in place before the entry thread can execute its first instruction.
-    let ida_entry_address = runtime.target.to_ida_address(entry_address);
-    add_breakpoint(&runtime, entry_address)
-        .map_err(anyhow::Error::msg)
-        .with_context(|| {
-            format!(
-                "installing entry-point breakpoint at IDA {ida_entry_address:#x} (runtime {entry_address:#x})"
-            )
-        })?;
-    tracing::info!(
-        entry = %format!("{ida_entry_address:#x}"),
-        runtime = %format!("{entry_address:#x}"),
-        "automatic entry-point breakpoint installed"
-    );
-
-    if let Some(winmain_address) = default_winmain_address(&runtime.target) {
-        let ida_winmain_address = runtime.target.to_ida_address(winmain_address);
-        match add_breakpoint(&runtime, winmain_address) {
-            Ok(()) => tracing::info!(
-                ida = %format!("{ida_winmain_address:#x}"),
-                runtime = %format!("{winmain_address:#x}"),
-                "automatic WinMain breakpoint installed"
-            ),
-            Err(error) => tracing::warn!(
-                ida = %format!("{ida_winmain_address:#x}"),
-                runtime = %format!("{winmain_address:#x}"),
-                %error,
-                "could not install automatic WinMain breakpoint"
-            ),
-        }
-    } else {
-        tracing::warn!(
-            ida = %format!("{DEFAULT_WINMAIN_IDA_ADDRESS:#x}"),
-            ida_base = %format!("{:#x}", runtime.target.ida_base),
-            image_size = %format!("{:#x}", runtime.target.image_size),
-            "WinMain breakpoint is outside the title image; skipping"
+    // Startup breakpoints are explicit CLI arguments. No breakpoint is
+    // installed by default, so the title starts from its actual entry point.
+    for (spec, breakpoint_address) in resolved_breakpoints {
+        add_breakpoint(&runtime, breakpoint_address)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| {
+                format!(
+                    "installing startup breakpoint {spec:?} at IDA/native {:#x} (runtime {breakpoint_address:#x})",
+                    runtime.target.to_ida_address(breakpoint_address)
+                )
+            })?;
+        tracing::info!(
+            requested = %spec,
+            address = %format!("{:#x}", runtime.target.to_ida_address(breakpoint_address)),
+            runtime = %format!("{breakpoint_address:#x}"),
+            "startup software breakpoint installed"
         );
     }
 
