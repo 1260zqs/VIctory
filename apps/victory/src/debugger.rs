@@ -110,6 +110,10 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
     let listener = TcpListener::bind(("127.0.0.1", port))
         .with_context(|| format!("binding debugger to 127.0.0.1:{port}"))?;
     let address = listener.local_addr()?;
+    let entry_address = target
+        .image_base
+        .checked_add(target.entry_rva as usize)
+        .context("title entry-point address overflow")?;
 
     let runtime = Arc::new(Runtime {
         target,
@@ -140,6 +144,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
     let handler = unsafe { AddVectoredExceptionHandler(1, Some(exception_handler)) };
     anyhow::ensure!(!handler.is_null(), "AddVectoredExceptionHandler failed");
 
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     thread::Builder::new()
         .name("victory-debug-http".into())
         .spawn(move || {
@@ -147,6 +152,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
                 .server_thread
                 // SAFETY: a plain query of the calling server thread.
                 .store(unsafe { GetCurrentThreadId() }, Ordering::Release);
+            let _ = ready_tx.send(());
             tracing::info!(%address, "runtime debugger listening");
             for connection in listener.incoming() {
                 match connection {
@@ -155,6 +161,16 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
                 }
             }
         })?;
+    ready_rx
+        .recv()
+        .context("waiting for the debugger HTTP thread to start")?;
+
+    // The title has not been launched yet, so this breakpoint is guaranteed
+    // to be in place before the entry thread can execute its first instruction.
+    add_breakpoint(&runtime, entry_address)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("installing entry-point breakpoint at {entry_address:#x}"))?;
+    tracing::info!(entry = %format!("{entry_address:#x}"), "automatic entry-point breakpoint installed");
 
     Ok(format!("http://127.0.0.1:{}", address.port()))
 }

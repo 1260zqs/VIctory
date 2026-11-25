@@ -165,7 +165,10 @@ target\release\victory.exe run <game dir>\<the title's exe> --execute --debugger
 ```
 
 Open **http://127.0.0.1:17890** in a browser. Use `--debugger=PORT` to choose
-another port. The listener binds only to loopback. It shows the title image
+another port. The listener binds only to loopback. Before launching the title,
+VIctory installs an automatic software breakpoint at the executable entry
+point, so execution stops there as soon as the main thread reaches it. Continue
+from the debugger UI to run the title. The debugger shows the title image
 mapping, live x64 thread registers, virtual memory regions, memory bytes and
 software breakpoints. Pause freezes the other process threads while leaving
 the debugger's HTTP thread responsive. Continue releases them. A breakpoint
