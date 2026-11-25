@@ -193,7 +193,7 @@ pub fn run(
                     .unwrap_or_else(|| exe.display().to_string()),
                 build_hash: hash.to_string(),
                 image_base: image.base(),
-                preferred_base: image.info().image_base,
+                ida_base: image.info().image_base,
                 image_size: image.info().size_of_image as usize,
                 entry_rva: image.info().entry_rva,
             },
