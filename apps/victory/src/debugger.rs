@@ -22,7 +22,7 @@ use windows_sys::Win32::Foundation::{
 };
 use windows_sys::Win32::System::Diagnostics::Debug::{
     AddVectoredExceptionHandler, CONTEXT, CONTEXT_FULL_AMD64, EXCEPTION_POINTERS,
-    FlushInstructionCache, GetThreadContext, ReadProcessMemory,
+    FlushInstructionCache, GetThreadContext, ReadProcessMemory, WriteProcessMemory,
 };
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
@@ -981,6 +981,114 @@ fn memory_json(runtime: &Runtime, address: usize, requested: usize) -> Value {
     })
 }
 
+fn write_memory(runtime: &Runtime, address: usize, bytes: &[u8]) -> Result<(), String> {
+    if bytes.is_empty() || bytes.len() > MAX_MEMORY_READ {
+        return Err(format!("write length must be between 1 and {MAX_MEMORY_READ:#x} bytes"));
+    }
+    if !runtime.control.lock().unwrap_or_else(|e| e.into_inner()).paused {
+        return Err("memory writes require a paused process".into());
+    }
+    let end = address
+        .checked_add(bytes.len())
+        .ok_or_else(|| "memory write address overflows".to_owned())?;
+
+    // Keep one write inside a single VirtualQuery region so restoring the
+    // original protection cannot accidentally alter a neighboring region.
+    // SAFETY: zeroed is a valid output buffer for MEMORY_BASIC_INFORMATION.
+    let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: VirtualQuery writes into the correctly sized structure.
+    let queried = unsafe {
+        VirtualQuery(
+            address as *const c_void,
+            &mut info,
+            size_of::<MEMORY_BASIC_INFORMATION>(),
+        )
+    };
+    if queried == 0 || info.State != 0x1000 {
+        return Err(format!("address {address:#x} is not committed memory"));
+    }
+    let region_start = info.BaseAddress as usize;
+    let region_end = region_start.saturating_add(info.RegionSize);
+    if address < region_start || end > region_end {
+        return Err("memory write crosses a region boundary".into());
+    }
+    if info.Protect & 0x100 != 0 || info.Protect & 0xff == 0x01 {
+        return Err(format!("address {address:#x} is guarded or inaccessible"));
+    }
+
+    if runtime
+        .breakpoints
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .range(address..end)
+        .next()
+        .is_some()
+    {
+        return Err("remove overlapping software breakpoints before writing memory".into());
+    }
+
+    let target = address as *mut c_void;
+    let mut old_protect = 0u32;
+    // SAFETY: the range is committed and confined to one queried region.
+    if unsafe {
+        VirtualProtect(
+            target,
+            bytes.len(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old_protect,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+
+    let mut written = 0usize;
+    // SAFETY: VirtualProtect above made the complete destination range writable.
+    let write_ok = unsafe {
+        WriteProcessMemory(
+            GetCurrentProcess(),
+            target,
+            bytes.as_ptr().cast(),
+            bytes.len(),
+            &mut written,
+        )
+    } != 0 && written == bytes.len();
+
+    let mut ignored = 0u32;
+    // SAFETY: restores the protection returned by the successful VirtualProtect call.
+    let restored = unsafe { VirtualProtect(target, bytes.len(), old_protect, &mut ignored) } != 0;
+    if !restored {
+        return Err(format!(
+            "memory was written, but restoring page protection failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if !write_ok {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+
+    if matches!(old_protect & 0xff, 0x10 | 0x20 | 0x40 | 0x80) {
+        // SAFETY: flushes modified instructions in this process.
+        unsafe { FlushInstructionCache(GetCurrentProcess(), target, bytes.len()) };
+    }
+    Ok(())
+}
+
+fn parse_hex_bytes(value: &str) -> Option<Vec<u8>> {
+    let value = value.trim().trim_start_matches("0x").trim_start_matches("0X");
+    if value.is_empty() || value.len() % 2 != 0 || value.len() / 2 > MAX_MEMORY_READ {
+        return None;
+    }
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).ok()?;
+            u8::from_str_radix(pair, 16).ok()
+        })
+        .collect()
+}
+
 fn breakpoints_json(runtime: &Runtime) -> Value {
     let breakpoints = runtime.breakpoints.lock().unwrap_or_else(|e| e.into_inner());
     Value::Array(
@@ -1375,6 +1483,31 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 .unwrap_or(0x100);
             (200, memory_json(runtime, address, length))
         }
+        ("POST", "/api/memory/write") => {
+            let Some(address) = parse_address(query_value(query, "address"), None) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"missing or invalid address"}"#);
+                return;
+            };
+            let Some(bytes) = query_value(query, "hex").and_then(|value| parse_hex_bytes(&value)) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"missing or invalid hex payload (expected 1-4096 bytes)"}"#);
+                return;
+            };
+            let address = match runtime.target.to_process_address(address as u64) {
+                Ok(address) => address,
+                Err(error) => {
+                    respond(&mut stream, 400, "application/json", &json!({"error": error}).to_string());
+                    return;
+                }
+            };
+            match write_memory(runtime, address, &bytes) {
+                Ok(()) => (200, json!({
+                    "address": format!("{:#x}", runtime.target.to_ida_address(address)),
+                    "written": bytes.len(),
+                    "hex": bytes.iter().map(|byte| format!("{byte:02X}")).collect::<String>(),
+                })),
+                Err(error) => (409, json!({"error": error})),
+            }
+        }
         ("GET", "/api/breakpoints") => (200, breakpoints_json(runtime)),
         ("POST", "/api/pause") => {
             pause(runtime);
@@ -1477,6 +1610,16 @@ mod tests {
         context.0.Rip = 0x00007ff908101ec8;
 
         assert_eq!(breakpoint_address(&context.0), 0x00007ff908101ec8);
+    }
+
+    #[test]
+    fn memory_write_hex_parser_is_bounded_and_strict() {
+        assert_eq!(parse_hex_bytes("4883EC28"), Some(vec![0x48, 0x83, 0xEC, 0x28]));
+        assert_eq!(parse_hex_bytes("0xCC"), Some(vec![0xCC]));
+        assert_eq!(parse_hex_bytes("0"), None);
+        assert_eq!(parse_hex_bytes("GG"), None);
+        assert_eq!(parse_hex_bytes(""), None);
+        assert_eq!(parse_hex_bytes(&"AA".repeat(MAX_MEMORY_READ + 1)), None);
     }
 
     #[test]
