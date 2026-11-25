@@ -197,9 +197,36 @@ The loopback HTTP API also exposes:
 - `POST /api/registers/set?thread=ID&name=RAX&value=0x...` — edit a
   general-purpose register on the thread at the active exception stop. Title
   addresses in register values use IDA space; edits apply when the thread resumes.
-- A title-generated `INT3` / `__debugbreak()` is reported as
-  `reason:"exception"` in `/api/status`; Resume skips the INT3, while Step
-  skips it and stops after the next native instruction.
+- `GET /api/io/breakpoints` — read the file-I/O breakpoint configuration.
+- `POST /api/io/breakpoints?read=true&write=true&path=common.rpf` — arm
+  read/write breakpoints, optionally filtered by a case-insensitive path
+  substring. Omit `path` or pass an empty value to match every path.
+- `GET /api/io/events` — retrieve the last 100 observed file-I/O requests.
+
+The neon runtime dashboard shows the selected thread's call stack automatically
+when a stop is reported. File-I/O breakpoints stop the thread that initiates the
+operation, before the intercepted call proceeds. They cover VIctory's title
+HLE boundaries for Win32 `ReadFile`/`WriteFile`, CRT `fread`/`fwrite`
+and `_read`/`_write`, plus DirectStorage request enqueue. The DirectStorage
+stack is the game thread that submits the request, not the worker that later
+performs the queued read. The event history records requested operations; it
+does not claim that the underlying I/O later succeeded.
+
+These are API-boundary breakpoints, **not** x64 hardware data breakpoints
+(DR0–DR3). They are intended to answer "which game function asked the runtime
+to read or write this file?" They do not catch arbitrary I/O performed by
+unhooked host-library code or direct native syscalls that bypass these HLE
+entry points.
+
+A title-generated `INT3` / `__debugbreak()` is reported as
+`reason:"exception"` in `/api/status`. Resume skips the one-byte INT3
+instruction; it does not repair the assertion or guarantee the title can
+continue. Step skips that INT3 and stops after the next native instruction.
+First-chance access violations (`0xC0000005`) and illegal-instruction
+exceptions can also be inspected with their call stack and access details.
+Resume without editing the saved context passes those exceptions to later
+Windows exception handlers; editing a register or RIP and resuming applies the
+modified context instead.
 
 This is an in-process debugger, not a CPU emulator or a remote debugger.
 Memory reads are capped at 4 KiB per request. Pausing all threads can catch a
