@@ -37,6 +37,7 @@ use windows_sys::Win32::System::Threading::{
 };
 
 const TRAP_FLAG: u32 = 0x100;
+const DEFAULT_WINMAIN_IDA_ADDRESS: u64 = 0x145A91BD0;
 const MAX_HTTP_HEADER: usize = 16 * 1024;
 const MAX_MEMORY_READ: usize = 0x1000;
 
@@ -92,6 +93,14 @@ impl DebugTarget {
     fn rebase_delta(&self) -> i128 {
         self.ida_base as i128 - self.image_base as i128
     }
+}
+
+fn default_winmain_address(target: &DebugTarget) -> Option<usize> {
+    let address = target
+        .to_process_address(DEFAULT_WINMAIN_IDA_ADDRESS)
+        .ok()?;
+    let offset = address.checked_sub(target.image_base)?;
+    (offset < target.image_size).then_some(address)
 }
 
 struct Runtime {
@@ -225,6 +234,30 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
         runtime = %format!("{entry_address:#x}"),
         "automatic entry-point breakpoint installed"
     );
+
+    if let Some(winmain_address) = default_winmain_address(&runtime.target) {
+        let ida_winmain_address = runtime.target.to_ida_address(winmain_address);
+        match add_breakpoint(&runtime, winmain_address) {
+            Ok(()) => tracing::info!(
+                ida = %format!("{ida_winmain_address:#x}"),
+                runtime = %format!("{winmain_address:#x}"),
+                "automatic WinMain breakpoint installed"
+            ),
+            Err(error) => tracing::warn!(
+                ida = %format!("{ida_winmain_address:#x}"),
+                runtime = %format!("{winmain_address:#x}"),
+                %error,
+                "could not install automatic WinMain breakpoint"
+            ),
+        }
+    } else {
+        tracing::warn!(
+            ida = %format!("{DEFAULT_WINMAIN_IDA_ADDRESS:#x}"),
+            ida_base = %format!("{:#x}", runtime.target.ida_base),
+            image_size = %format!("{:#x}", runtime.target.image_size),
+            "WinMain breakpoint is outside the title image; skipping"
+        );
+    }
 
     Ok(format!("http://127.0.0.1:{}", address.port()))
 }
@@ -1169,6 +1202,36 @@ mod tests {
             target.to_process_address(external_address as u64),
             Ok(external_address)
         );
+    }
+
+    #[test]
+    fn default_winmain_breakpoint_is_rebased_from_ida_space() {
+        let target = DebugTarget {
+            title: "test".into(),
+            build_hash: "test".into(),
+            image_base: 0x00007ff600000000,
+            ida_base: 0x140000000,
+            image_size: 0x06000000,
+            entry_rva: 0x1000,
+        };
+        let expected = target.image_base + 0x05a91bd0;
+
+        assert_eq!(default_winmain_address(&target), Some(expected));
+        assert_eq!(target.to_ida_address(expected), DEFAULT_WINMAIN_IDA_ADDRESS);
+    }
+
+    #[test]
+    fn default_winmain_breakpoint_is_skipped_outside_title_image() {
+        let target = DebugTarget {
+            title: "test".into(),
+            build_hash: "test".into(),
+            image_base: 0x00007ff600000000,
+            ida_base: 0x140000000,
+            image_size: 0x300000,
+            entry_rva: 0x1000,
+        };
+
+        assert_eq!(default_winmain_address(&target), None);
     }
 
     #[test]
