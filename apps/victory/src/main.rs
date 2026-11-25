@@ -117,6 +117,9 @@ enum Command {
         /// Start the in-process HTTP debugger (default port 17890; --debugger=PORT to override).
         #[arg(long, num_args = 0..=1, default_missing_value = "17890", require_equals = true, requires = "execute")]
         debugger: Option<u16>,
+        /// Install a startup software breakpoint at an IDA or native VA (repeatable).
+        #[arg(long = "break", value_name = "ADDRESS", requires = "debugger", action = clap::ArgAction::Append)]
+        breakpoints: Vec<String>,
         /// The console model the title sees (device type, memory).
         #[arg(long, value_enum, default_value_t = Console::SeriesX)]
         console: Console,
@@ -188,10 +191,11 @@ fn main() -> Result<()> {
             strict,
             execute,
             debugger,
+            breakpoints,
             console,
             title_args: _,
         } => {
-            let code = run::run(&exe, unimplemented, strict, execute, debugger, console)?;
+            let code = run::run(&exe, unimplemented, strict, execute, debugger, breakpoints, console)?;
             if code != 0 {
                 // Preserve all 32 bits of the Windows process status.
                 std::process::exit(code as i32);
