@@ -427,6 +427,17 @@ async function refreshStack(){
     $("stackHeadline").textContent=error.message;
   }
 }
+// Centre a row inside its own scroller. scrollIntoView() also scrolls every
+// scrollable ancestor, so Go used to drag the browser window's scrollbar with
+// it; setting scrollTop on the panel keeps the page where it is.
+function centreInPanel(row){
+  const box=row.closest(".scroll");
+  if(!box)return;
+  const panel=box.getBoundingClientRect();
+  const line=row.getBoundingClientRect();
+  const offset=line.top-panel.top;
+  box.scrollTop=Math.max(0,box.scrollTop+offset-(box.clientHeight-line.height)/2);
+}
 async function loadDisassembly(address=null){
   const value=String(address||$("asmAddress").value||selectedFrameAddress||latestStatus?.hit_address||"").trim();
   if(!value)return;
@@ -449,7 +460,7 @@ async function loadDisassembly(address=null){
       loadDisassembly(button.dataset.address);
     }));
     const current=$("disassembly").querySelector(".asm-current");
-    if(current)current.scrollIntoView({block:"center"});
+    if(current)centreInPanel(current);
   }catch(error){
     $("asmState").textContent="UNAVAILABLE";
     $("asmInfo").textContent=error.message;
