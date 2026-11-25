@@ -128,6 +128,7 @@ struct Control {
     hit_thread: Option<u32>,
     hit_registers: Option<Registers>,
     hit_context: Option<CONTEXT>,
+    pending_context: Option<CONTEXT>,
     exception_code: Option<u32>,
     action: Action,
     step_thread: Option<u32>,
@@ -184,6 +185,7 @@ pub fn start(port: u16, target: DebugTarget) -> Result<String> {
             hit_thread: None,
             hit_registers: None,
             hit_context: None,
+            pending_context: None,
             exception_code: None,
             action: Action::Wait,
             step_thread: None,
@@ -342,13 +344,18 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.exception_code = None;
         control.step_thread = Some(thread_id);
         control.step_breakpoint = Some(address);
+        control.pending_context = None;
         control.action = Action::Wait;
         runtime.changed.notify_all();
 
         while control.action == Action::Wait {
             control = runtime.changed.wait(control).unwrap_or_else(|e| e.into_inner());
         }
+        if let Some(pending) = control.pending_context.take() {
+            *context = pending;
+        }
         control.stop_after_instruction = control.action == Action::Step;
+        context.EFlags |= TRAP_FLAG;
         control.paused = false;
         runtime.changed.notify_all();
         return -1; // EXCEPTION_CONTINUE_EXECUTION
@@ -401,6 +408,7 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
         control.hit_thread = Some(thread_id);
         control.hit_registers = Some(Registers::from(context));
         control.hit_context = Some(*context);
+        control.pending_context = None;
         control.exception_code = None;
         control.action = Action::Wait;
         runtime.changed.notify_all();
@@ -411,6 +419,9 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
 
         match control.action {
             Action::Step => {
+                if let Some(pending) = control.pending_context.take() {
+                    *context = pending;
+                }
                 control.paused = false;
                 control.stop_after_instruction = true;
                 context.EFlags |= TRAP_FLAG;
@@ -418,8 +429,12 @@ unsafe extern "system" fn exception_handler(info: *mut EXCEPTION_POINTERS) -> i3
                 return -1;
             }
             Action::Continue => {
+                if let Some(pending) = control.pending_context.take() {
+                    *context = pending;
+                }
                 control.paused = false;
                 control.stop_after_instruction = false;
+                context.EFlags &= !TRAP_FLAG;
                 control.reason = "running";
                 control.hit_address = None;
                 control.hit_thread = None;
@@ -456,6 +471,7 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     stopped_context.Rip = address as u64;
     control.hit_registers = Some(Registers::from(&stopped_context));
     control.hit_context = Some(stopped_context);
+    control.pending_context = None;
     control.exception_code = Some(EXCEPTION_BREAKPOINT);
     control.step_thread = Some(thread_id);
     control.step_breakpoint = None;
@@ -468,6 +484,9 @@ fn handle_title_breakpoint(runtime: &Runtime, context: &mut CONTEXT, address: us
     }
 
     let action = control.action;
+    if let Some(pending) = control.pending_context.take() {
+        *context = pending;
+    }
     control.paused = false;
     control.reason = "running";
     control.hit_address = None;
@@ -725,6 +744,58 @@ fn registers_json(runtime: &Runtime, thread_id: u32) -> Result<Value, String> {
     Ok(json!({
         "thread_id": thread_id,
         "registers": registers.json(&runtime.target),
+    }))
+}
+
+fn set_context_register(context: &mut CONTEXT, name: &str, value: u64) -> Result<(), String> {
+    match name.to_ascii_lowercase().as_str() {
+        "rax" => context.Rax = value,
+        "rbx" => context.Rbx = value,
+        "rcx" => context.Rcx = value,
+        "rdx" => context.Rdx = value,
+        "rsi" => context.Rsi = value,
+        "rdi" => context.Rdi = value,
+        "rbp" => context.Rbp = value,
+        "rsp" => context.Rsp = value,
+        "rip" => context.Rip = value,
+        "r8" => context.R8 = value,
+        "r9" => context.R9 = value,
+        "r10" => context.R10 = value,
+        "r11" => context.R11 = value,
+        "r12" => context.R12 = value,
+        "r13" => context.R13 = value,
+        "r14" => context.R14 = value,
+        "r15" => context.R15 = value,
+        "rflags" | "eflags" => {
+            context.EFlags = u32::try_from(value)
+                .map_err(|_| "RFLAGS must fit in 32 bits".to_owned())?;
+        }
+        _ => return Err(format!("unsupported register: {name}")),
+    }
+    Ok(())
+}
+
+fn set_register(runtime: &Runtime, thread_id: u32, name: &str, value: u64) -> Result<Value, String> {
+    let mut control = runtime.control.lock().unwrap_or_else(|e| e.into_inner());
+    if !control.paused {
+        return Err("register writes require a paused process".into());
+    }
+    if control.hit_thread != Some(thread_id) {
+        return Err("register writes currently require the thread at the active stop".into());
+    }
+    let mut context = control
+        .pending_context
+        .or(control.hit_context)
+        .ok_or_else(|| "the active stop has no saved exception context".to_owned())?;
+    set_context_register(&mut context, name, value)?;
+    control.hit_context = Some(context);
+    control.pending_context = Some(context);
+    control.hit_registers = Some(Registers::from(&context));
+    Ok(json!({
+        "thread_id": thread_id,
+        "register": name.to_ascii_uppercase(),
+        "value": format!("{value:#x}"),
+        "registers": Registers::from(&context).json(&runtime.target),
     }))
 }
 
@@ -1239,6 +1310,7 @@ fn pause(runtime: &Runtime) {
     control.hit_thread = None;
     control.hit_registers = None;
     control.hit_context = None;
+    control.pending_context = None;
     control.exception_code = None;
     runtime.changed.notify_all();
 }
@@ -1421,6 +1493,26 @@ fn serve(mut stream: TcpStream, runtime: &Arc<Runtime>, port: u16) {
                 None => 30_000,
             };
             (200, wait_for_stop(runtime, Duration::from_millis(timeout_ms)))
+        }
+        ("POST", "/api/registers/set") => {
+            let Some(thread_id) = query_value(query, "thread")
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"invalid thread ID"}"#);
+                return;
+            };
+            let Some(name) = query_value(query, "name") else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"missing register name"}"#);
+                return;
+            };
+            let Some(value) = parse_address(query_value(query, "value"), None) else {
+                respond(&mut stream, 400, "application/json", r#"{"error":"missing or invalid register value"}"#);
+                return;
+            };
+            match set_register(runtime, thread_id, &name, value as u64) {
+                Ok(value) => (200, value),
+                Err(error) => (409, json!({"error": error})),
+            }
         }
         ("GET", "/api/stack") => {
             let Some(thread_id) = query_value(query, "thread")
@@ -1611,6 +1703,20 @@ mod tests {
         context.0.Rip = 0x00007ff908101ec8;
 
         assert_eq!(breakpoint_address(&context.0), 0x00007ff908101ec8);
+    }
+
+    #[test]
+    fn register_writer_updates_general_purpose_registers() {
+        let mut context = AlignedContext(unsafe { std::mem::zeroed() });
+        set_context_register(&mut context.0, "RAX", 0x1234).unwrap();
+        set_context_register(&mut context.0, "rip", 0x140001000).unwrap();
+        set_context_register(&mut context.0, "rflags", 0x202).unwrap();
+
+        assert_eq!(context.0.Rax, 0x1234);
+        assert_eq!(context.0.Rip, 0x140001000);
+        assert_eq!(context.0.EFlags, 0x202);
+        assert!(set_context_register(&mut context.0, "xmm0", 0).is_err());
+        assert!(set_context_register(&mut context.0, "rflags", u64::MAX).is_err());
     }
 
     #[test]
